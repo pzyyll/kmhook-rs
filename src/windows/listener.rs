@@ -7,6 +7,7 @@
 //!
 //! Description: @todo add msg listener
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::result::Result;
 use std::sync::mpsc::Sender;
@@ -16,9 +17,9 @@ use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, HC_ACTION, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_QUIT,
-    WM_RBUTTONDOWN, WM_RBUTTONUP,
+    TranslateMessage, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
+    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+    WM_MOUSEMOVE, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_USER,
 };
 
 use crate::types::{
@@ -26,6 +27,14 @@ use crate::types::{
 };
 use crate::{types, EventListener, JoinHandleType};
 use lazy_static::lazy_static;
+
+type FnEvent = Arc<Box<dyn Fn(EventType) + Send + Sync + 'static>>;
+type FnShourtcut = Arc<Box<dyn Fn() + Send + Sync + 'static>>;
+
+thread_local! {
+    static LOCAL_KEYBOARD_HHOOK: RefCell<HashMap<ID, HHOOK>> = RefCell::new(HashMap::new());
+    static LOCAL_MOUSE_HHOOK: RefCell<HashMap<ID, HHOOK>> = RefCell::new(HashMap::new());
+}
 
 fn gen_id() -> ID {
     static mut ID: ID = 0;
@@ -35,6 +44,7 @@ fn gen_id() -> ID {
     }
 }
 
+const WM_USER_RECHECK_HOOK: u32 = 1;
 // const WM_USER_SET_KEYBOARD_HOOK: u32 = WM_USER + 1;
 // const WM_USER_SET_MOUSE_HOOK: u32 = WM_USER + 2;
 // const WM_USER_UNSET_KEYBOARD_HOOK: u32 = WM_USER + 3;
@@ -99,7 +109,7 @@ impl EventLoop {
                 //     unsafe { GetCurrentThreadId() }
                 // },
                 // event_loop.id, event_type, event_loop);
-                event_loop.post_msg(event_type.clone());
+                event_loop.post_msg_to_worker(event_type.clone());
             }
         }
         CallNextHookEx(None, ncode, wparam, lparam)
@@ -121,7 +131,7 @@ impl EventLoop {
 
             let button = match mtype {
                 WM_LBUTTONDOWN => {
-                    // println!("mouse_hook_proc ldown {:?}", minfo);
+                    println!("mouse_hook_proc ldown {:?}", minfo);
                     Some((MouseButton::Left(MouseStateFlags::PRESSED),))
                 }
                 WM_LBUTTONUP => {
@@ -153,10 +163,11 @@ impl EventLoop {
 
             if let Some((button,)) = button {
                 // Handle the button event here
+                // println!("mouse_hook_proc {:?}", button);
                 let event_type = EventType::MouseEvent(Some(MouseEventInfo { button, pos }));
                 let event_loops = EVENT_LOOP_MANAGER.lock().unwrap().get_reg_msg_event_loop();
                 for event_loop in event_loops.iter() {
-                    event_loop.post_msg(event_type.clone());
+                    event_loop.post_msg_to_worker(event_type.clone());
                 }
             }
         }
@@ -165,17 +176,85 @@ impl EventLoop {
 
     fn set_keyboard_hook(&self) {
         unsafe {
-            let _ = SetWindowsHookExW(WH_KEYBOARD_LL, Some(Self::keyboard_hook_proc), None, 0);
+            if let Ok(hhook) =
+                SetWindowsHookExW(WH_KEYBOARD_LL, Some(Self::keyboard_hook_proc), None, 0)
+            {
+                LOCAL_KEYBOARD_HHOOK.with_borrow_mut(|ids| {
+                    ids.insert(self.id, hhook);
+                });
+            }
         }
     }
 
     fn set_mouse_hook(&self) {
         unsafe {
-            let _ = SetWindowsHookExW(WH_MOUSE_LL, Some(Self::mouse_hook_proc), None, 0);
+            if let Ok(hhook) = SetWindowsHookExW(WH_MOUSE_LL, Some(Self::mouse_hook_proc), None, 0)
+            {
+                LOCAL_MOUSE_HHOOK.with_borrow_mut(|ids| {
+                    ids.insert(self.id, hhook);
+                });
+            }
         }
     }
 
-    fn post_msg(&self, event_type: EventType) {
+    fn unhook_keyboard(&self) {
+        LOCAL_KEYBOARD_HHOOK.with_borrow_mut(|ids| {
+            if let Some(hhook) = ids.remove(&self.id) {
+                unsafe {
+                    println!("unhook_keyboard {:?}", hhook);
+                    let _ = UnhookWindowsHookEx(hhook);
+                }
+            }
+        });
+    }
+
+    fn unhook_mouse(&self) {
+        LOCAL_MOUSE_HHOOK.with_borrow_mut(|ids| {
+            if let Some(hhook) = ids.remove(&self.id) {
+                unsafe {
+                    println!("unhook_mouse {:?}", hhook);
+                    let _ = UnhookWindowsHookEx(hhook);
+                }
+            }
+        });
+    }
+
+    fn recheck_hook(&self) {
+        if let Some(listener) = self.listener.upgrade().as_ref() {
+            let (mut set_keyboard_flag, mut set_mouse_flag) = (false, false);
+
+            if let Ok(event_map) = listener.event_map.lock().as_ref() {
+                for (_, (etype, _)) in event_map.iter() {
+                    match etype {
+                        EventType::All => {
+                            set_keyboard_flag = true;
+                            set_mouse_flag = true;
+                            break;
+                        }
+                        EventType::KeyboardEvent(_) => set_keyboard_flag = true,
+                        EventType::MouseEvent(_) => set_mouse_flag = true,
+                    }
+                    if set_keyboard_flag & set_mouse_flag {
+                        break;
+                    }
+                }
+            }
+
+            if set_keyboard_flag {
+                self.set_keyboard_hook();
+            } else {
+                self.unhook_keyboard();
+            }
+
+            if set_mouse_flag {
+                self.set_mouse_hook();
+            } else {
+                self.unhook_mouse();
+            }
+        }
+    }
+
+    fn post_msg_to_worker(&self, event_type: EventType) {
         // println!("{:?} post_msg {:?}", unsafe{GetCurrentThreadId()}, event_type);
         self.listener
             .upgrade()
@@ -188,17 +267,34 @@ impl EventLoop {
             .post_msg(Some(event_type));
     }
 
+    fn post_msg_to_loop(&self, msg_type: u32) {
+        let thread_id = {
+            let binding = self.loop_thread_id.lock().unwrap();
+            *binding
+        };
+        if thread_id == 0 {
+            return;
+        }
+        unsafe {
+            let _ = PostThreadMessageW(thread_id, WM_USER, WPARAM(msg_type as usize), None);
+        }
+    }
+
     fn run(&self) {
-        *self.loop_thread_id.lock().unwrap() = unsafe { GetCurrentThreadId() };
-        println!(
-            "run loop_thread_id: {:?}",
-            *self.loop_thread_id.lock().unwrap()
-        );
+        {
+            *self.loop_thread_id.lock().unwrap() = unsafe { GetCurrentThreadId() };
+        }
+
         let mut msg = MSG::default();
         unsafe {
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
+                match msg.message {
+                    WM_USER if msg.wParam.0 as u32 == WM_USER_RECHECK_HOOK => self.recheck_hook(),
+                    _ => {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                }
             }
         }
     }
@@ -221,8 +317,7 @@ impl EventLoop {
             .unwrap()
             .reg_msg_event(event_loop.id);
         let handle = thread::spawn(move || {
-            event_loop.set_keyboard_hook();
-            event_loop.set_mouse_hook();
+            event_loop.recheck_hook();
             event_loop.run();
         });
         self.thread_handle.lock().unwrap().replace(Arc::new(handle));
@@ -329,43 +424,58 @@ impl Worker {
 pub struct Listener {
     listener_event_loop: Mutex<Option<Arc<EventLoop>>>,
     worker: Mutex<Option<Arc<Worker>>>,
-    event_map: Mutex<HashMap<ID, (EventType, Box<dyn Fn(EventType) + Send + Sync + 'static>)>>,
-    shortcut_map: Mutex<HashMap<ID, (Shortcut, Box<dyn Fn() + Send + Sync + 'static>)>>,
-    mouse_map: Mutex<
-        HashMap<
-            ID,
-            (
-                MouseButton,
-                Box<dyn Fn(MouseEventInfo) + Send + Sync + 'static>,
-            ),
-        >,
-    >,
+    event_map: Mutex<HashMap<ID, (EventType, FnEvent)>>,
+    shortcut_map: Mutex<HashMap<ID, (Shortcut, FnShourtcut)>>,
 }
 
 impl Listener {
-    fn on_event(&self, event_type: EventType) {
-        self.event_map
-            .lock()
-            .unwrap()
-            .values()
-            .for_each(|(et, cb)| {
+    fn filter_events(&self, event_type: &EventType) -> Vec<(EventType, FnEvent)> {
+        let binding = self.event_map.lock().unwrap();
+        binding
+            .iter()
+            .filter_map(|(_, (et, cb))| {
                 if matches!(et, EventType::All)
-                    || std::mem::discriminant(et) == std::mem::discriminant(&event_type)
+                    || std::mem::discriminant(et) == std::mem::discriminant(event_type)
                 {
-                    cb(event_type.clone());
+                    Some((et.clone(), cb.clone()))
+                } else {
+                    None
                 }
-            });
+            })
+            .collect()
+    }
 
-        if self.shortcut_map.lock().unwrap().len() > 0 {
-            if let EventType::KeyboardEvent(Some(info)) = event_type {
-                // todo
-                println!("on_event {:?}", info);
+    fn filter_shortcuts(&self, et: &EventType) -> Vec<(Shortcut, FnShourtcut)> {
+        let mut resutl = Vec::new();
+        resutl
+        // todo
+    }
+
+    fn on_event(&self, event_type: EventType) {
+        for (et, cb) in self.filter_events(&event_type).iter() {
+            if matches!(et, EventType::All)
+                || std::mem::discriminant(et) == std::mem::discriminant(&event_type)
+            {
+                cb(event_type.clone());
             }
+        }
+
+        for (shortcut, cb) in self.filter_shortcuts(&event_type).iter() {
+            cb();
         }
     }
 
     fn gen_id(&self) -> ID {
         gen_id()
+    }
+
+    fn post_recheck_hook(&self) {
+        self.listener_event_loop
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .post_msg_to_loop(WM_USER_RECHECK_HOOK);
     }
 }
 
@@ -382,7 +492,6 @@ impl EventListener for Listener {
             listener_event_loop: Mutex::new(None),
             event_map: Mutex::new(HashMap::new()),
             shortcut_map: Mutex::new(HashMap::new()),
-            mouse_map: Mutex::new(HashMap::new()),
             worker: Mutex::new(None),
         };
         let rc = Arc::new(listener);
@@ -413,12 +522,13 @@ impl EventListener for Listener {
     }
 
     fn shutdown(&self) {
-        self.listener_event_loop
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .stop();
+        self.del_all_events();
+        if let Some(worker) = self.worker.lock().unwrap().as_ref() {
+            worker.post_msg(None);
+        }
+        if let Some(event_loop) = self.listener_event_loop.lock().unwrap().as_ref() {
+            event_loop.stop();
+        }
     }
 
     fn add_event_listener<F>(&self, cb: F, event_type: Option<EventType>) -> Result<ID, String>
@@ -430,7 +540,8 @@ impl EventListener for Listener {
         self.event_map
             .lock()
             .unwrap()
-            .insert(id, (et, Box::new(cb)));
+            .insert(id, (et, Arc::new(Box::new(cb))));
+        self.post_recheck_hook();
         Ok(id)
     }
 
@@ -446,19 +557,21 @@ impl EventListener for Listener {
         self.shortcut_map
             .lock()
             .unwrap()
-            .insert(id, (shortcut, Box::new(cb)));
+            .insert(id, (shortcut, Arc::new(Box::new(cb))));
+        self.post_recheck_hook();
         Ok(id)
     }
 
     fn del_all_events(&self) {
         self.event_map.lock().unwrap().clear();
         self.shortcut_map.lock().unwrap().clear();
-        self.mouse_map.lock().unwrap().clear();
+        self.post_recheck_hook();
     }
 
     fn del_event_by_id(&self, id: types::ID) {
         self.event_map.lock().unwrap().remove(&id);
         self.shortcut_map.lock().unwrap().remove(&id);
-        self.mouse_map.lock().unwrap().remove(&id);
+        self.post_recheck_hook();
+        println!("del_event_by_id finish {:?}", id);
     }
 }

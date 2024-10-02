@@ -19,13 +19,7 @@ pub trait EventListener {
     ) -> std::result::Result<types::ID, String>
     where
         F: Fn()  + Send + Sync + 'static;
-    // fn add_global_mouse<F>(
-    //     &mut self,
-    //     mouse_button: types::MouseButton,
-    //     cb: F,
-    // ) -> std::result::Result<types::ID, String>
-    // where
-    //     F: Fn(types::MouseEventInfo) + 'static;
+
     fn add_event_listener<F>(
         &self,
         cb: F,
