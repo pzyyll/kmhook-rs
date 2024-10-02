@@ -18,14 +18,17 @@ use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
     TranslateMessage, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
-    WM_MOUSEMOVE, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_USER,
+    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+    WM_MBUTTONUP, WM_MOUSEMOVE, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_USER,
 };
 
 use crate::types::{
-    EventType, KeyId, KeyboardInfo, MouseButton, MouseEventInfo, MouseStateFlags, Pos, Shortcut, ID,
+    EventType, KeyId, KeyInfo, KeyState, KeyboardState, MouseButton, MouseInfo, MouseStateFlags,
+    Pos, Shortcut, ID,
 };
-use crate::{types, EventListener, JoinHandleType};
+// use crate::windows::KeyIdFrom;
+use crate::consts;
+use crate::types::{EventListener, JoinHandleType};
 use lazy_static::lazy_static;
 
 type FnEvent = Arc<Box<dyn Fn(EventType) + Send + Sync + 'static>>;
@@ -34,6 +37,7 @@ type FnShourtcut = Arc<Box<dyn Fn() + Send + Sync + 'static>>;
 thread_local! {
     static LOCAL_KEYBOARD_HHOOK: RefCell<HashMap<ID, HHOOK>> = RefCell::new(HashMap::new());
     static LOCAL_MOUSE_HHOOK: RefCell<HashMap<ID, HHOOK>> = RefCell::new(HashMap::new());
+    static LOCAL_KEYBOARD_STATE: RefCell<KeyboardState> = RefCell::new(KeyboardState::new(Some(consts::MAX_KEYS)));
 }
 
 fn gen_id() -> ID {
@@ -81,34 +85,41 @@ impl EventLoop {
         lparam: LPARAM,
     ) -> LRESULT {
         if ncode == HC_ACTION.try_into().unwrap() {
-            // println!("keyboard_hook_proc");
             let kb = &*(lparam.0 as *const usize as *const KBDLLHOOKSTRUCT);
-            let vkcode = kb.scanCode;
+            // println!("keyboard_hook_proc {:?}", kb);
 
-            println!("keyboard_hook_proc {:?}", kb);
+            let keyid = match KeyId::try_from(*kb) {
+                Ok(keyid) => keyid,
+                Err(_) => {
+                    println!("keyid convert err {:?}", kb);
+                    return CallNextHookEx(None, ncode, wparam, lparam);
+                }
+            };
 
-            let keyid = KeyId::from_win(vkcode);
+            let key_state = match wparam.0 as u32 {
+                WM_KEYDOWN | WM_SYSKEYDOWN => KeyState::Pressed,
+                _ => KeyState::Released,
+            };
 
-            if keyid.is_err() {
-                println!("keyid convert err {:?}", vkcode);
+            let mut key = KeyInfo::new(keyid, key_state);
+            let mut old_state: Option<KeyboardState> = None;
+            LOCAL_KEYBOARD_STATE.with_borrow_mut(|state| {
+                old_state.replace(state.clone());
+                state.update_key(keyid.into(), key_state);
+                key.keyboard_state = Some(state.clone());
+                // println!("keyboard_state: {:?}", state);
+            });
+
+            if old_state == key.keyboard_state {
+                // println!("keyboard_hook_proc same state {:?}", key);
                 return CallNextHookEx(None, ncode, wparam, lparam);
             }
 
-            let key = KeyboardInfo {
-                key_code: keyid.unwrap(),
-            };
-
             let event_type = EventType::KeyboardEvent(Some(key));
 
-            // get all event loops
             let event_loops = EVENT_LOOP_MANAGER.lock().unwrap().get_reg_msg_event_loop();
 
-            // println!("event_loops: {:?}", event_loops);
             for event_loop in event_loops.iter() {
-                // println!("thread_id: {:?}, id:{:?} post_msg {:?}, event_loop {:?}", {
-                //     unsafe { GetCurrentThreadId() }
-                // },
-                // event_loop.id, event_type, event_loop);
                 event_loop.post_msg_to_worker(event_type.clone());
             }
         }
@@ -164,7 +175,7 @@ impl EventLoop {
             if let Some((button,)) = button {
                 // Handle the button event here
                 // println!("mouse_hook_proc {:?}", button);
-                let event_type = EventType::MouseEvent(Some(MouseEventInfo { button, pos }));
+                let event_type = EventType::MouseEvent(Some(MouseInfo { button, pos }));
                 let event_loops = EVENT_LOOP_MANAGER.lock().unwrap().get_reg_msg_event_loop();
                 for event_loop in event_loops.iter() {
                     event_loop.post_msg_to_worker(event_type.clone());
@@ -429,6 +440,14 @@ pub struct Listener {
 }
 
 impl Listener {
+    fn get_worker(&self) -> Option<Arc<Worker>> {
+        self.worker.lock().unwrap().clone()
+    }
+
+    fn get_event_loop(&self) -> Option<Arc<EventLoop>> {
+        self.listener_event_loop.lock().unwrap().clone()
+    }
+
     fn filter_events(&self, event_type: &EventType) -> Vec<(EventType, FnEvent)> {
         let binding = self.event_map.lock().unwrap();
         binding
@@ -510,20 +529,20 @@ impl EventListener for Listener {
     /// Handle event callbacks in a separate thread. Default is `true`.
     /// return: `Option<JoinHandleType>` if `work_thread` is `true`, else `None`.
     fn startup(self: &Arc<Self>, work_thread: Option<bool>) -> Option<JoinHandleType> {
-        if let Some(event_loop) = self.listener_event_loop.lock().unwrap().as_ref() {
+        if let Some(event_loop) = self.get_event_loop().as_ref() {
             event_loop.run_with_thread();
         }
 
-        let w = {
-            let worker = self.worker.lock().unwrap();
-            worker.as_ref().unwrap().clone()
-        };
-        w.run(work_thread)
+        if let Some(w) = self.get_worker() {
+            w.run(work_thread)
+        } else {
+            None
+        }
     }
 
     fn shutdown(&self) {
         self.del_all_events();
-        if let Some(worker) = self.worker.lock().unwrap().as_ref() {
+        if let Some(worker) = self.get_worker() {
             worker.post_msg(None);
         }
         if let Some(event_loop) = self.listener_event_loop.lock().unwrap().as_ref() {
@@ -545,11 +564,7 @@ impl EventListener for Listener {
         Ok(id)
     }
 
-    fn add_global_shortcut<F>(
-        &self,
-        shortcut: types::Shortcut,
-        cb: F,
-    ) -> std::result::Result<types::ID, String>
+    fn add_global_shortcut<F>(&self, shortcut: Shortcut, cb: F) -> std::result::Result<ID, String>
     where
         F: Fn() + Send + Sync + 'static,
     {
@@ -568,7 +583,7 @@ impl EventListener for Listener {
         self.post_recheck_hook();
     }
 
-    fn del_event_by_id(&self, id: types::ID) {
+    fn del_event_by_id(&self, id: ID) {
         self.event_map.lock().unwrap().remove(&id);
         self.shortcut_map.lock().unwrap().remove(&id);
         self.post_recheck_hook();

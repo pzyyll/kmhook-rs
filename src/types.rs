@@ -1,7 +1,9 @@
 #![allow(unused)]
+use std::{sync::Arc, thread::JoinHandle};
+
 use bitflags::bitflags;
 
-pub use keycode::{KeyMap, KeyMappingId, KeyState};
+pub use keycode::{KeyMap, KeyMappingId, KeyState, KeyboardState};
 
 pub type ID = usize;
 
@@ -18,19 +20,7 @@ bitflags! {
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
-pub struct KeyId(KeyMappingId);
-
-impl KeyId {
-    pub fn from_win(vkcode: u32) -> std::result::Result<Self, ()> {
-        let r = KeyMap::from_key_mapping(keycode::KeyMapping::Win(vkcode as u16))?;
-        Ok(Self(r.id))
-    }
-
-    pub fn from_mac(vkcode: u32) -> std::result::Result<Self, ()> {
-        let r = KeyMap::from_key_mapping(keycode::KeyMapping::Mac(vkcode as u16))?;
-        Ok(Self(r.id))
-    }
-}
+pub struct KeyId(pub KeyMappingId);
 
 impl From<KeyMappingId> for KeyId {
     fn from(id: KeyMappingId) -> Self {
@@ -44,6 +34,18 @@ impl Into<KeyMappingId> for KeyId {
     }
 }
 
+impl From<KeyMap> for KeyId {
+    fn from(key_map: KeyMap) -> Self {
+        Self(key_map.id)
+    }
+}
+
+impl Into<KeyMap> for KeyId {
+    fn into(self) -> KeyMap {
+        KeyMap::from(self.0)
+    }
+}
+
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub enum MouseButton {
     Left(MouseStateFlags),
@@ -53,8 +55,22 @@ pub enum MouseButton {
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
-pub struct KeyboardInfo {
+pub struct KeyInfo {
     pub key_code: KeyId,
+    pub state: KeyState,
+
+    /// All keys state
+    pub keyboard_state: Option<KeyboardState>,
+}
+
+impl KeyInfo {
+    pub fn new(key_code: KeyId, state: KeyState) -> Self {
+        Self {
+            key_code,
+            state,
+            keyboard_state: None,
+        }
+    }
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -64,21 +80,44 @@ pub struct Pos {
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
-pub struct MouseEventInfo {
+pub struct MouseInfo {
     pub button: MouseButton,
     pub pos: Pos,
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub enum EventType {
-    KeyboardEvent(Option<KeyboardInfo>),
-    MouseEvent(Option<MouseEventInfo>),
+    KeyboardEvent(Option<KeyInfo>),
+    MouseEvent(Option<MouseInfo>),
     All,
 }
 
 #[derive(Debug)]
 pub struct Shortcut {
     pub keys: Vec<KeyId>,
+}
+
+pub type JoinHandleType = JoinHandle<()>;
+
+pub trait EventListener {
+    fn new() -> Arc<Self>;
+    fn add_global_shortcut<F>(&self, shortcut: Shortcut, cb: F) -> std::result::Result<ID, String>
+    where
+        F: Fn() + Send + Sync + 'static;
+
+    fn add_event_listener<F>(
+        &self,
+        cb: F,
+        event_type: Option<EventType>,
+    ) -> std::result::Result<ID, String>
+    where
+        F: Fn(EventType) + Send + Sync + 'static;
+
+    fn del_event_by_id(&self, id: ID);
+    fn del_all_events(&self);
+
+    fn startup(self: &Arc<Self>, work_thread: Option<bool>) -> Option<JoinHandleType>;
+    fn shutdown(&self);
 }
 
 #[cfg(test)]
@@ -95,9 +134,10 @@ mod tests {
 
     #[test]
     fn test_event_info() {
-        let event_type = EventType::KeyboardEvent(Some(KeyboardInfo {
-            key_code: KeyId::from(KeyMappingId::UsA),
-        }));
+        let event_type = EventType::KeyboardEvent(Some(KeyInfo::new(
+            KeyId::from(KeyMappingId::UsA),
+            KeyState::Pressed,
+        )));
 
         match event_type {
             EventType::KeyboardEvent(info) => {
@@ -120,9 +160,10 @@ mod tests {
 
         // println!("{:?}", map);
 
-        let et = EventType::KeyboardEvent(Some(KeyboardInfo {
-            key_code: KeyId::from(KeyMappingId::UsA),
-        }));
+        let et = EventType::KeyboardEvent(Some(KeyInfo::new(
+            KeyId::from(KeyMappingId::UsA),
+            KeyState::Pressed,
+        )));
         for (k, v) in map.iter() {
             if let Some(k) = k {
                 if std::mem::discriminant(k) == std::mem::discriminant(&et) {
@@ -133,6 +174,14 @@ mod tests {
 
         let win_vkcode = KeyMappingId::UsA;
         let win_vkcode2 = KeyMappingId::AltLeft;
+
+        if let Some(modifier) = KeyMap::from(KeyMappingId::ShiftLeft).modifier {
+            println!("modifier {:?}", modifier);
+        }
+
+        if let Some(modifier) = KeyMap::from(KeyMappingId::ShiftLeft).modifier {
+            println!("modifier {:?}", modifier);
+        }
 
         println!("{:?}", KeyMap::from(win_vkcode));
         let win_vk = KeyMap::from(win_vkcode).win;
@@ -152,7 +201,10 @@ mod tests {
         println!("MetaLeft {:?}", KeyMap::from(KeyMappingId::MetaLeft));
         println!("MetaRight {:?}", KeyMap::from(KeyMappingId::MetaRight));
         println!("ControlLeft {:?}", KeyMap::from(KeyMappingId::ControlLeft));
-        println!("ControlRight {:?}", KeyMap::from(KeyMappingId::ControlRight));
+        println!(
+            "ControlRight {:?}",
+            KeyMap::from(KeyMappingId::ControlRight)
+        );
         println!("AltLeft {:?}", KeyMap::from(KeyMappingId::AltLeft));
         println!("AltRight {:?}", KeyMap::from(KeyMappingId::AltRight));
     }

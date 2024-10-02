@@ -8,4 +8,12 @@
 //! Description: todo
 // todo
 
+
 pub mod listener;
+pub mod types_ext;
+
+// pub trait KeyIdFrom {
+//     fn from_win(scancode: u32, vkcode: u32) -> std::result::Result<Self, ()>
+//     where
+//         Self: Sized;
+// }
