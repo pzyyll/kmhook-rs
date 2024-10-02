@@ -168,7 +168,6 @@ mod tests {
     };
 
     use keycode::KeyMapping;
-    use rdev::{Event, Key};
 
     use super::*;
 

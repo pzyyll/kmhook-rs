@@ -5,10 +5,8 @@ edition = "2021"
 
 [dependencies]
 bitflags = "2.6.0"
-key-mapping = "0.4.1"
 keycode = "0.4.0"
 lazy_static = "1.5.0"
-rdev = "0.5.3"
 
 [target."cfg(windows)".dependencies]
 windows = { version = "0.58.0", features = [
