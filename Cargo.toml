@@ -1,0 +1,21 @@
+[package]
+name = "kmhook-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitflags = "2.6.0"
+key-mapping = "0.4.1"
+keycode = "0.4.0"
+lazy_static = "1.5.0"
+rdev = "0.5.3"
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.58.0", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Devices_Display",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_TextServices",
+] }
