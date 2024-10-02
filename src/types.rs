@@ -3,7 +3,7 @@ use std::{sync::Arc, thread::JoinHandle};
 
 use bitflags::bitflags;
 
-pub use keycode::{KeyMap, KeyMappingId, KeyState, KeyboardState};
+pub use keycode::{KeyMap, KeyMappingId as KeyCode, KeyState, KeyboardState};
 
 pub type ID = usize;
 
@@ -20,16 +20,22 @@ bitflags! {
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
-pub struct KeyId(pub KeyMappingId);
+pub struct KeyId(pub KeyCode);
 
-impl From<KeyMappingId> for KeyId {
-    fn from(id: KeyMappingId) -> Self {
+impl KeyId {
+    pub fn is_modifier(&self) -> bool {
+        KeyMap::from(self.0).modifier.is_some()
+    }
+}
+
+impl From<KeyCode> for KeyId {
+    fn from(id: KeyCode) -> Self {
         Self(id)
     }
 }
 
-impl Into<KeyMappingId> for KeyId {
-    fn into(self) -> KeyMappingId {
+impl Into<KeyCode> for KeyId {
+    fn into(self) -> KeyCode {
         self.0
     }
 }
@@ -56,7 +62,7 @@ pub enum MouseButton {
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub struct KeyInfo {
-    pub key_code: KeyId,
+    pub key_id: KeyId,
     pub state: KeyState,
 
     /// All keys state
@@ -64,9 +70,9 @@ pub struct KeyInfo {
 }
 
 impl KeyInfo {
-    pub fn new(key_code: KeyId, state: KeyState) -> Self {
+    pub fn new(key_id: KeyId, state: KeyState) -> Self {
         Self {
-            key_code,
+            key_id,
             state,
             keyboard_state: None,
         }
@@ -94,7 +100,41 @@ pub enum EventType {
 
 #[derive(Debug)]
 pub struct Shortcut {
-    pub keys: Vec<KeyId>,
+    pub keys: Vec<KeyCode>,
+    _keyboard_state_usb_input: Vec<u8>,
+}
+
+impl Shortcut {
+    pub fn new(keys: Vec<KeyCode>) -> std::result::Result<Self, String> {
+        // Check if keys have duplicates
+        let mut unique_keys = std::collections::HashSet::new();
+        for key in &keys {
+            if !unique_keys.insert(key) {
+                return Err("Duplicate keys found".to_string());
+            }
+        }
+
+        let mut _keyboard_state = KeyboardState::new(Some(crate::consts::MAX_KEYS));
+        for key in &keys {
+            _keyboard_state.update_key(KeyMap::from(*key), KeyState::Pressed);
+        }
+        Ok(Self {
+            keys,
+            _keyboard_state_usb_input: _keyboard_state.usb_input_report().to_vec(),
+        })
+    }
+
+    pub fn is_input_match(&self, usb_input: &Vec<u8>) -> bool {
+        self._keyboard_state_usb_input == *usb_input
+    }
+
+    pub fn has_modifier(&self) -> bool {
+        return self._keyboard_state_usb_input.len() > 0 && self._keyboard_state_usb_input[0] != 0;
+    }
+
+    pub fn has_normal_key(&self) -> bool {
+        return self._keyboard_state_usb_input.len() > 2 && self._keyboard_state_usb_input[2] != 0;
+    }
 }
 
 pub type JoinHandleType = JoinHandle<()>;
@@ -135,7 +175,7 @@ mod tests {
     #[test]
     fn test_event_info() {
         let event_type = EventType::KeyboardEvent(Some(KeyInfo::new(
-            KeyId::from(KeyMappingId::UsA),
+            KeyId::from(KeyCode::UsA),
             KeyState::Pressed,
         )));
 
@@ -161,7 +201,7 @@ mod tests {
         // println!("{:?}", map);
 
         let et = EventType::KeyboardEvent(Some(KeyInfo::new(
-            KeyId::from(KeyMappingId::UsA),
+            KeyId::from(KeyCode::UsA),
             KeyState::Pressed,
         )));
         for (k, v) in map.iter() {
@@ -172,14 +212,14 @@ mod tests {
             }
         }
 
-        let win_vkcode = KeyMappingId::UsA;
-        let win_vkcode2 = KeyMappingId::AltLeft;
+        let win_vkcode = KeyCode::UsA;
+        let win_vkcode2 = KeyCode::AltLeft;
 
-        if let Some(modifier) = KeyMap::from(KeyMappingId::ShiftLeft).modifier {
+        if let Some(modifier) = KeyMap::from(KeyCode::ShiftLeft).modifier {
             println!("modifier {:?}", modifier);
         }
 
-        if let Some(modifier) = KeyMap::from(KeyMappingId::ShiftLeft).modifier {
+        if let Some(modifier) = KeyMap::from(KeyCode::ShiftLeft).modifier {
             println!("modifier {:?}", modifier);
         }
 
@@ -198,14 +238,11 @@ mod tests {
         // let usa = KeyId::UsA;
         // println!("{:?}", usa);
 
-        println!("MetaLeft {:?}", KeyMap::from(KeyMappingId::MetaLeft));
-        println!("MetaRight {:?}", KeyMap::from(KeyMappingId::MetaRight));
-        println!("ControlLeft {:?}", KeyMap::from(KeyMappingId::ControlLeft));
-        println!(
-            "ControlRight {:?}",
-            KeyMap::from(KeyMappingId::ControlRight)
-        );
-        println!("AltLeft {:?}", KeyMap::from(KeyMappingId::AltLeft));
-        println!("AltRight {:?}", KeyMap::from(KeyMappingId::AltRight));
+        println!("MetaLeft {:?}", KeyMap::from(KeyCode::MetaLeft));
+        println!("MetaRight {:?}", KeyMap::from(KeyCode::MetaRight));
+        println!("ControlLeft {:?}", KeyMap::from(KeyCode::ControlLeft));
+        println!("ControlRight {:?}", KeyMap::from(KeyCode::ControlRight));
+        println!("AltLeft {:?}", KeyMap::from(KeyCode::AltLeft));
+        println!("AltRight {:?}", KeyMap::from(KeyCode::AltRight));
     }
 }

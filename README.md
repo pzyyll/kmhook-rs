@@ -5,7 +5,8 @@ A keyboard and mouse event library implemented in Rust, mainly used for practici
 ## Main functions:
 
 1. Listen to global keyboard and mouse events
-2. Send simulated keyboard input
+2. Register global hotkeys
+3. Send simulated keyboard input
 
 ## TODO:
 
@@ -13,4 +14,3 @@ A keyboard and mouse event library implemented in Rust, mainly used for practici
 - [ ] Support MacOS
 - [ ] Support Linux
 - [ ] Simulated keyboard input
-

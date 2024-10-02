@@ -1,12 +1,10 @@
 #![allow(warnings)]
 
-use std::sync::{Arc, Mutex};
-
-use keycode::{KeyMapping, KeyMappingId};
 use kmhook_rs::{
-    types::{EventListener, EventType, KeyId, MouseButton},
+    types::{EventListener, EventType, KeyCode, KeyId, MouseButton},
     Listener,
 };
+use std::sync::{Arc, Mutex};
 
 fn main() {
     let listener = Listener::new();
@@ -18,14 +16,17 @@ fn main() {
         move |event_type: EventType| match event_type {
             EventType::KeyboardEvent(Some(info)) => {
                 println!("KeyboardEvent {:?}", info);
-                println!("KeyboardState {:?}", info.keyboard_state.unwrap().usb_input_report());
-                if info.key_code == KeyId::from(KeyMappingId::UsA) {
+                println!(
+                    "KeyboardState {:?}",
+                    info.keyboard_state.unwrap().usb_input_report()
+                );
+                if info.key_id == KeyId::from(KeyCode::UsA) {
                     println!("Pressed A");
                     // let _ = id2.lock().and_then(|op| {
                     //     l.as_ref().del_event_by_id(*op);
                     //     Ok(())
                     // });
-                } else if info.key_code == KeyId::from(KeyMappingId::Escape) {
+                } else if info.key_id == KeyId::from(KeyCode::Escape) {
                     println!("Pressed Escape");
                     l.as_ref().shutdown();
                 }

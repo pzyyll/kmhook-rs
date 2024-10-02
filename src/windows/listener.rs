@@ -84,44 +84,46 @@ impl EventLoop {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
-        if ncode == HC_ACTION.try_into().unwrap() {
-            let kb = &*(lparam.0 as *const usize as *const KBDLLHOOKSTRUCT);
-            // println!("keyboard_hook_proc {:?}", kb);
+        if ncode != HC_ACTION.try_into().unwrap() {
+            return CallNextHookEx(None, ncode, wparam, lparam);
+        }
 
-            let keyid = match KeyId::try_from(*kb) {
-                Ok(keyid) => keyid,
-                Err(_) => {
-                    println!("keyid convert err {:?}", kb);
-                    return CallNextHookEx(None, ncode, wparam, lparam);
-                }
-            };
+        let kb = &*(lparam.0 as *const usize as *const KBDLLHOOKSTRUCT);
+        // println!("keyboard_hook_proc {:?}", kb);
 
-            let key_state = match wparam.0 as u32 {
-                WM_KEYDOWN | WM_SYSKEYDOWN => KeyState::Pressed,
-                _ => KeyState::Released,
-            };
-
-            let mut key = KeyInfo::new(keyid, key_state);
-            let mut old_state: Option<KeyboardState> = None;
-            LOCAL_KEYBOARD_STATE.with_borrow_mut(|state| {
-                old_state.replace(state.clone());
-                state.update_key(keyid.into(), key_state);
-                key.keyboard_state = Some(state.clone());
-                // println!("keyboard_state: {:?}", state);
-            });
-
-            if old_state == key.keyboard_state {
-                // println!("keyboard_hook_proc same state {:?}", key);
+        let keyid = match KeyId::try_from(*kb) {
+            Ok(keyid) => keyid,
+            Err(_) => {
+                println!("keyid convert err {:?}", kb);
                 return CallNextHookEx(None, ncode, wparam, lparam);
             }
+        };
 
-            let event_type = EventType::KeyboardEvent(Some(key));
+        let key_state = match wparam.0 as u32 {
+            WM_KEYDOWN | WM_SYSKEYDOWN => KeyState::Pressed,
+            _ => KeyState::Released,
+        };
 
-            let event_loops = EVENT_LOOP_MANAGER.lock().unwrap().get_reg_msg_event_loop();
+        let mut key = KeyInfo::new(keyid, key_state);
+        let mut old_state: Option<KeyboardState> = None;
+        LOCAL_KEYBOARD_STATE.with_borrow_mut(|state| {
+            old_state.replace(state.clone());
+            state.update_key(keyid.into(), key_state);
+            key.keyboard_state = Some(state.clone());
+            // println!("keyboard_state: {:?}", state);
+        });
 
-            for event_loop in event_loops.iter() {
-                event_loop.post_msg_to_worker(event_type.clone());
-            }
+        if old_state == key.keyboard_state {
+            // println!("keyboard_hook_proc same state {:?}", key);
+            return CallNextHookEx(None, ncode, wparam, lparam);
+        }
+
+        let event_type = EventType::KeyboardEvent(Some(key));
+
+        let event_loops = EVENT_LOOP_MANAGER.lock().unwrap().get_keyboard_event_loop();
+
+        for event_loop in event_loops.iter() {
+            event_loop.post_msg_to_worker(event_type.clone());
         }
         CallNextHookEx(None, ncode, wparam, lparam)
     }
@@ -176,7 +178,7 @@ impl EventLoop {
                 // Handle the button event here
                 // println!("mouse_hook_proc {:?}", button);
                 let event_type = EventType::MouseEvent(Some(MouseInfo { button, pos }));
-                let event_loops = EVENT_LOOP_MANAGER.lock().unwrap().get_reg_msg_event_loop();
+                let event_loops = { EVENT_LOOP_MANAGER.lock().unwrap().get_mouse_event_loop() };
                 for event_loop in event_loops.iter() {
                     event_loop.post_msg_to_worker(event_type.clone());
                 }
@@ -193,6 +195,10 @@ impl EventLoop {
                 LOCAL_KEYBOARD_HHOOK.with_borrow_mut(|ids| {
                     ids.insert(self.id, hhook);
                 });
+                EVENT_LOOP_MANAGER
+                    .lock()
+                    .unwrap()
+                    .add_keyboard_event(self.id);
             }
         }
     }
@@ -204,6 +210,7 @@ impl EventLoop {
                 LOCAL_MOUSE_HHOOK.with_borrow_mut(|ids| {
                     ids.insert(self.id, hhook);
                 });
+                EVENT_LOOP_MANAGER.lock().unwrap().add_mouse_event(self.id);
             }
         }
     }
@@ -214,6 +221,10 @@ impl EventLoop {
                 unsafe {
                     println!("unhook_keyboard {:?}", hhook);
                     let _ = UnhookWindowsHookEx(hhook);
+                    EVENT_LOOP_MANAGER
+                        .lock()
+                        .unwrap()
+                        .del_keyboard_event(self.id);
                 }
             }
         });
@@ -225,6 +236,7 @@ impl EventLoop {
                 unsafe {
                     println!("unhook_mouse {:?}", hhook);
                     let _ = UnhookWindowsHookEx(hhook);
+                    EVENT_LOOP_MANAGER.lock().unwrap().del_mouse_event(self.id);
                 }
             }
         });
@@ -249,6 +261,10 @@ impl EventLoop {
                         break;
                     }
                 }
+            }
+
+            if let Ok(shortcut_map) = listener.shortcut_map.lock().as_ref() {
+                set_keyboard_flag = shortcut_map.len() > 0;
             }
 
             if set_keyboard_flag {
@@ -323,10 +339,6 @@ impl EventLoop {
 
     fn run_with_thread(self: &Arc<Self>) {
         let event_loop = Arc::clone(self);
-        EVENT_LOOP_MANAGER
-            .lock()
-            .unwrap()
-            .reg_msg_event(event_loop.id);
         let handle = thread::spawn(move || {
             event_loop.recheck_hook();
             event_loop.run();
@@ -338,14 +350,16 @@ impl EventLoop {
 #[derive(Debug)]
 struct EventLoopManager {
     event_loops: HashMap<ID, Arc<EventLoop>>,
-    reg_msg_event_ids: Vec<ID>,
+    keyboard_event_ids: Vec<ID>,
+    mouse_event_ids: Vec<ID>,
 }
 
 impl EventLoopManager {
     fn new() -> Self {
         Self {
             event_loops: HashMap::new(),
-            reg_msg_event_ids: Vec::new(),
+            keyboard_event_ids: Vec::new(),
+            mouse_event_ids: Vec::new(),
         }
     }
 
@@ -355,17 +369,35 @@ impl EventLoopManager {
         event_loop
     }
 
-    fn reg_msg_event(&mut self, id: ID) {
-        self.reg_msg_event_ids.push(id);
+    fn add_keyboard_event(&mut self, id: ID) {
+        self.keyboard_event_ids.push(id);
     }
 
-    fn del_msg_event(&mut self, id: ID) {
-        self.reg_msg_event_ids.retain(|&x| x != id);
+    fn del_keyboard_event(&mut self, id: ID) {
+        self.keyboard_event_ids.retain(|&x| x != id);
     }
 
-    fn get_reg_msg_event_loop(&self) -> Vec<Arc<EventLoop>> {
+    fn add_mouse_event(&mut self, id: ID) {
+        self.mouse_event_ids.push(id);
+    }
+
+    fn del_mouse_event(&mut self, id: ID) {
+        self.mouse_event_ids.retain(|&x| x != id);
+    }
+
+    fn get_keyboard_event_loop(&self) -> Vec<Arc<EventLoop>> {
         let mut event_loops = Vec::new();
-        for id in self.reg_msg_event_ids.iter() {
+        for id in self.keyboard_event_ids.iter() {
+            if let Some(event_loop) = self.event_loops.get(id) {
+                event_loops.push(event_loop.clone());
+            }
+        }
+        event_loops
+    }
+
+    fn get_mouse_event_loop(&self) -> Vec<Arc<EventLoop>> {
+        let mut event_loops = Vec::new();
+        for id in self.mouse_event_ids.iter() {
             if let Some(event_loop) = self.event_loops.get(id) {
                 event_loops.push(event_loop.clone());
             }
@@ -375,7 +407,8 @@ impl EventLoopManager {
 
     fn del_event_loop(&mut self, id: ID) {
         self.event_loops.remove(&id);
-        self.del_msg_event(id);
+        self.del_keyboard_event(id);
+        self.del_mouse_event(id);
     }
 }
 
@@ -464,14 +497,38 @@ impl Listener {
             .collect()
     }
 
-    fn filter_shortcuts(&self, et: &EventType) -> Vec<(Shortcut, FnShourtcut)> {
-        let mut resutl = Vec::new();
-        resutl
-        // todo
+    fn filter_shortcut(&self, et: &EventType) -> Option<FnShourtcut> {
+        match et {
+            EventType::KeyboardEvent(Some(key_info)) => {
+                if key_info.state != KeyState::Pressed {
+                    return None;
+                }
+                if let Some(keyboard_state) = &key_info.keyboard_state {
+                    let binding = self.shortcut_map.lock().unwrap();
+                    let usb_input = keyboard_state.clone().usb_input_report().to_vec();
+                    for (_, (shortcut, cb)) in binding.iter() {
+                        if shortcut.is_input_match(&usb_input) {
+                            // Check if the modifier key is pressed, and when used with other keys,
+                            // the last key pressed must not be a modifier key.
+                            if shortcut.has_modifier()
+                                & shortcut.has_normal_key()
+                                & key_info.key_id.is_modifier()
+                            {
+                                return None;
+                            }
+                            return Some(cb.clone());
+                        }
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
     }
 
     fn on_event(&self, event_type: EventType) {
-        for (et, cb) in self.filter_events(&event_type).iter() {
+        let events = self.filter_events(&event_type);
+        for (et, cb) in events.iter() {
             if matches!(et, EventType::All)
                 || std::mem::discriminant(et) == std::mem::discriminant(&event_type)
             {
@@ -479,7 +536,7 @@ impl Listener {
             }
         }
 
-        for (shortcut, cb) in self.filter_shortcuts(&event_type).iter() {
+        if let Some(cb) = self.filter_shortcut(&event_type) {
             cb();
         }
     }

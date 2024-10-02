@@ -9,17 +9,17 @@ use windows::Win32::UI::{
 impl KeyId {
     fn from_win(scancode: u32, vkcode: u32) -> std::result::Result<Self, ()> {
         match VIRTUAL_KEY(vkcode as u16) {
-            VK_LWIN => Ok(Self(crate::types::KeyMappingId::MetaLeft)),
-            VK_RWIN => Ok(Self(crate::types::KeyMappingId::MetaRight)),
-            VK_LCONTROL => Ok(Self(crate::types::KeyMappingId::ControlLeft)),
-            VK_RCONTROL => Ok(Self(crate::types::KeyMappingId::ControlRight)),
-            VK_LMENU => Ok(Self(crate::types::KeyMappingId::AltLeft)),
-            VK_RMENU => Ok(Self(crate::types::KeyMappingId::AltRight)),
+            VK_LWIN => Ok(Self(crate::types::KeyCode::MetaLeft)),
+            VK_RWIN => Ok(Self(crate::types::KeyCode::MetaRight)),
+            VK_LCONTROL => Ok(Self(crate::types::KeyCode::ControlLeft)),
+            VK_RCONTROL => Ok(Self(crate::types::KeyCode::ControlRight)),
+            VK_LMENU => Ok(Self(crate::types::KeyCode::AltLeft)),
+            VK_RMENU => Ok(Self(crate::types::KeyCode::AltRight)),
             _ => {
                 let keymap = crate::types::KeyMap::from_key_mapping(keycode::KeyMapping::Win(
                     scancode as u16,
                 ))?;
-                Ok(Self(crate::types::KeyMappingId::from(keymap.id)))
+                Ok(Self(crate::types::KeyCode::from(keymap.id)))
             }
         }
     }
