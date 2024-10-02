@@ -1,4 +1,4 @@
-# KMHook(keyboard and mouse hook)
+# KMHook(keyboard and mouse hook lib)
 
 A keyboard and mouse event library implemented in Rust, mainly used for practicing and mastering Rust.
 
