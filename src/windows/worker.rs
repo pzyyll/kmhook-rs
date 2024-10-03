@@ -123,7 +123,6 @@ impl Worker {
         }
     }
 
-
     pub fn run<F>(self: &Arc<Self>, handle: F, with_thread: Option<bool>) -> Option<JoinHandleType>
     where
         F: Fn(EventType) + Send + 'static,

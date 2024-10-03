@@ -5,15 +5,18 @@
 //! Author: Lizc
 //! Created Data: 2024-09-29
 //!
-//! Description: todo
-// todo
+//! Description: This is a windows event listener library.
 
-pub mod worker;
 pub mod listener;
 pub mod types_ext;
+
+pub(crate) mod event_loop;
+pub(crate) mod worker;
 
 // pub trait KeyIdFrom {
 //     fn from_win(scancode: u32, vkcode: u32) -> std::result::Result<Self, ()>
 //     where
 //         Self: Sized;
 // }
+
+pub(crate) const WM_USER_RECHECK_HOOK: u32 = 1;
