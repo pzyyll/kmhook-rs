@@ -102,6 +102,7 @@ impl EventLoop {
         let keyid = match KeyId::try_from(*kb) {
             Ok(keyid) => keyid,
             Err(_) => {
+                #[cfg(feature = "Debug")]
                 println!("keyid convert err {:?}", kb);
                 return CallNextHookEx(None, ncode, wparam, lparam);
             }
@@ -646,6 +647,13 @@ impl Listener {
         if let Some(cb) = self.filter_shortcut(&event_type) {
             cb();
         }
+
+        #[cfg(feature = "Debug")]
+        println!(
+            "{:?} event_type: {:?}\n ----------------on_event Finish ",
+            std::thread::current().id(),
+            event_type
+        );
     }
 
     fn gen_id(&self) -> ID {
