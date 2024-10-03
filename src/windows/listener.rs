@@ -93,7 +93,11 @@ impl EventLoop {
         // println!("keyboard_hook_proc {:?}", kb);
 
         #[cfg(feature = "Debug")]
-        println!("{:?} keyboard_hook_proc trigger {:?}", std::thread::current().id(), kb);
+        println!(
+            "{:?} keyboard_hook_proc trigger {:?}",
+            std::thread::current().id(),
+            kb
+        );
 
         let keyid = match KeyId::try_from(*kb) {
             Ok(keyid) => keyid,
@@ -131,7 +135,10 @@ impl EventLoop {
         }
 
         #[cfg(feature = "Debug")]
-        println!("{:?} keyboard_hook_proc trigger end call next", std::thread::current().id());
+        println!(
+            "{:?} keyboard_hook_proc trigger end call next",
+            std::thread::current().id()
+        );
 
         CallNextHookEx(None, ncode, wparam, lparam)
     }
@@ -146,7 +153,11 @@ impl EventLoop {
             let minfo = &*(lparam.0 as *const usize as *const MSLLHOOKSTRUCT);
 
             #[cfg(feature = "Debug")]
-            println!("{:?} mouse_hook_proc trigger {:?}", std::thread::current().id(), minfo);
+            println!(
+                "{:?} mouse_hook_proc trigger {:?}",
+                std::thread::current().id(),
+                minfo
+            );
 
             let pos = Pos {
                 x: minfo.pt.x,
@@ -196,7 +207,10 @@ impl EventLoop {
             }
 
             #[cfg(feature = "Debug")]
-            println!("{:?} mouse_hook_proc trigger end call next", std::thread::current().id());
+            println!(
+                "{:?} mouse_hook_proc trigger end call next",
+                std::thread::current().id()
+            );
         }
         CallNextHookEx(None, ncode, wparam, lparam)
     }
@@ -361,7 +375,7 @@ impl EventLoop {
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                 #[cfg(feature = "Debug")]
                 println!("{:?} GetMessageW {:?}", std::thread::current().id(), msg);
-                
+
                 match msg.message {
                     WM_USER if msg.wParam.0 as u32 == WM_USER_RECHECK_HOOK => self.recheck_hook(),
                     _ => {
@@ -609,6 +623,9 @@ impl Listener {
     }
 
     fn on_event(&self, event_type: EventType) {
+        #[cfg(feature = "Debug")]
+        println!("{:?} on_event {:?}", std::thread::current().id, event_type);
+
         let events = self.filter_events(&event_type);
         for (et, cb) in events.iter() {
             if matches!(et, EventType::All)
@@ -746,7 +763,10 @@ impl EventListener for Listener {
 
                 let elapsed = mtrigger_info.last_trigger_time.elapsed().as_millis();
                 #[cfg(feature = "Debug")]
-                println!("trigger times: {:?}, elapsed: {:?}", mtrigger_info.trigger, elapsed);
+                println!(
+                    "trigger times: {:?}, elapsed: {:?}",
+                    mtrigger_info.trigger, elapsed
+                );
 
                 if mtrigger_info.trigger == 0 || elapsed < next_internal {
                     mtrigger_info.increase();
@@ -764,7 +784,10 @@ impl EventListener for Listener {
             if need_trigger {
                 cb();
                 #[cfg(feature = "Debug")]
-                println!("------------------------Trigger------------------------{:?}", Instant::now());
+                println!(
+                    "------------------------Trigger------------------------{:?}",
+                    Instant::now()
+                );
             }
         })
     }
