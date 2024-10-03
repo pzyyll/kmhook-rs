@@ -122,14 +122,18 @@ impl EventLoop {
         });
 
         if old_state == key.keyboard_state {
-            // println!("keyboard_hook_proc same state {:?}", key);
+            #[cfg(feature = "Debug")]
+            println!(
+                "{:?} keyboard_hook_proc same state {:?}",
+                std::thread::current().id(),
+                key
+            );
             return CallNextHookEx(None, ncode, wparam, lparam);
         }
 
         let event_type = EventType::KeyboardEvent(Some(key));
 
-        let event_loops = EVENT_LOOP_MANAGER.lock().unwrap().get_keyboard_event_loop();
-
+        let event_loops = { EVENT_LOOP_MANAGER.lock().unwrap().get_keyboard_event_loop() };
         for event_loop in event_loops.iter() {
             event_loop.post_msg_to_worker(event_type.clone());
         }
@@ -624,7 +628,11 @@ impl Listener {
 
     fn on_event(&self, event_type: EventType) {
         #[cfg(feature = "Debug")]
-        println!("{:?} on_event {:?}", std::thread::current().id(), event_type);
+        println!(
+            "{:?} on_event {:?}",
+            std::thread::current().id(),
+            event_type
+        );
 
         let events = self.filter_events(&event_type);
         for (et, cb) in events.iter() {
