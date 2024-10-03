@@ -624,7 +624,7 @@ impl Listener {
 
     fn on_event(&self, event_type: EventType) {
         #[cfg(feature = "Debug")]
-        println!("{:?} on_event {:?}", std::thread::current().id, event_type);
+        println!("{:?} on_event {:?}", std::thread::current().id(), event_type);
 
         let events = self.filter_events(&event_type);
         for (et, cb) in events.iter() {
