@@ -286,7 +286,9 @@ impl EventLoop {
     }
 
     fn post_msg_to_worker(&self, event_type: EventType) {
-        // println!("{:?} post_msg {:?}", unsafe{GetCurrentThreadId()}, event_type);
+        #[cfg(feature = "Debug")]
+        println!("{:?} post_msg_to_worker {:?}", std::thread::current().id(), event_type);
+
         self.listener
             .upgrade()
             .unwrap()
@@ -299,6 +301,9 @@ impl EventLoop {
     }
 
     fn post_msg_to_loop(&self, msg_type: u32) {
+        #[cfg(feature = "Debug")]
+        println!("{:?} post_msg_to_loop {:?}", std::thread::current().id(), msg_type);
+
         let thread_id = {
             let binding = self.loop_thread_id.lock().unwrap();
             *binding
@@ -344,6 +349,8 @@ impl EventLoop {
     fn run_with_thread(self: &Arc<Self>) {
         let event_loop = Arc::clone(self);
         let handle = thread::spawn(move || {
+            #[cfg(feature = "Debug")]
+            println!("Event loop thread started with ID: {:?}", std::thread::current().id());
             event_loop.recheck_hook();
             event_loop.run();
         });
@@ -446,6 +453,8 @@ impl Worker {
 
         let listener = self.listener.clone();
         let worker_loop = move || {
+            #[cfg(feature = "Debug")]
+            println!("Worker loop thread started with ID: {:?}", std::thread::current().id());
             while let Ok(Some(event_type)) = rx.recv() {
                 if let Some(listener) = listener.upgrade() {
                     listener.on_event(event_type);
@@ -658,8 +667,8 @@ impl EventListener for Listener {
         {
             let mut binding = self.shortcut_map.lock().unwrap();
             for (_, (sc, _)) in binding.iter() {
-                println!("sc usb_input: {:?}", sc.usb_input());
-                println!("shortcut usb_input: {:?}", shortcut.usb_input());
+                // println!("sc usb_input: {:?}", sc.usb_input());
+                // println!("shortcut usb_input: {:?}", shortcut.usb_input());
                 if sc.is_input_match(shortcut.usb_input()) {
                     return Err("Shortcut already exists".to_string());
                 }
