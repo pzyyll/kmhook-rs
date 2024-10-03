@@ -13,6 +13,7 @@ use std::result::Result;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, Weak};
 use std::thread::{self};
+use std::time::Instant;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -188,30 +189,33 @@ impl EventLoop {
     }
 
     fn set_keyboard_hook(&self) {
-        unsafe {
-            if let Ok(hhook) =
-                SetWindowsHookExW(WH_KEYBOARD_LL, Some(Self::keyboard_hook_proc), None, 0)
-            {
-                LOCAL_KEYBOARD_HHOOK.with_borrow_mut(|ids| {
-                    ids.insert(self.id, hhook);
-                });
-                EVENT_LOOP_MANAGER
-                    .lock()
-                    .unwrap()
-                    .add_keyboard_event(self.id);
-            }
+        if LOCAL_KEYBOARD_HHOOK.with_borrow(|ids| ids.contains_key(&self.id)) {
+            return;
+        }
+        if let Ok(hhook) =
+            unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(Self::keyboard_hook_proc), None, 0) }
+        {
+            LOCAL_KEYBOARD_HHOOK.with_borrow_mut(|ids| {
+                ids.insert(self.id, hhook);
+            });
+            EVENT_LOOP_MANAGER
+                .lock()
+                .unwrap()
+                .add_keyboard_event(self.id);
         }
     }
 
     fn set_mouse_hook(&self) {
-        unsafe {
-            if let Ok(hhook) = SetWindowsHookExW(WH_MOUSE_LL, Some(Self::mouse_hook_proc), None, 0)
-            {
-                LOCAL_MOUSE_HHOOK.with_borrow_mut(|ids| {
-                    ids.insert(self.id, hhook);
-                });
-                EVENT_LOOP_MANAGER.lock().unwrap().add_mouse_event(self.id);
-            }
+        if LOCAL_MOUSE_HHOOK.with_borrow(|ids| ids.contains_key(&self.id)) {
+            return;
+        }
+        if let Ok(hhook) =
+            unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(Self::mouse_hook_proc), None, 0) }
+        {
+            LOCAL_MOUSE_HHOOK.with_borrow_mut(|ids| {
+                ids.insert(self.id, hhook);
+            });
+            EVENT_LOOP_MANAGER.lock().unwrap().add_mouse_event(self.id);
         }
     }
 
@@ -465,6 +469,31 @@ impl Worker {
     }
 }
 
+#[derive(Debug)]
+struct ShortcutTriggerInfo {
+    trigger: u32,
+    last_trigger_time: Instant,
+}
+
+impl ShortcutTriggerInfo {
+    fn new() -> Self {
+        Self {
+            trigger: 0,
+            last_trigger_time: Instant::now(),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.trigger = 0;
+        self.last_trigger_time = Instant::now();
+    }
+
+    fn increase(&mut self) {
+        self.trigger += 1;
+        self.last_trigger_time = Instant::now();
+    }
+}
+
 pub struct Listener {
     listener_event_loop: Mutex<Option<Arc<EventLoop>>>,
     worker: Mutex<Option<Arc<Worker>>>,
@@ -632,6 +661,48 @@ impl EventListener for Listener {
             .insert(id, (shortcut, Arc::new(Box::new(cb))));
         self.post_recheck_hook();
         Ok(id)
+    }
+
+    fn add_global_shortcut_trigger<F>(
+        &self,
+        shortcut: Shortcut,
+        cb: F,
+        trigger: u32,
+        internal: Option<u32>,
+    ) -> std::result::Result<ID, String>
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        let trigger_info = Arc::new(Mutex::new(ShortcutTriggerInfo::new()));
+        let next_internal = internal.unwrap_or(consts::DEFAULT_SHORTCUT_TRIGGER_INTERVAL) as u128;
+
+        self.add_global_shortcut(shortcut, move || {
+            // println!("trigger: {:?}", Instant::now());
+            let need_trigger = {
+                let mut mtrigger_info = trigger_info.lock().unwrap();
+
+                let elapsed = mtrigger_info.last_trigger_time.elapsed().as_millis();
+                // println!("elapsed: {:?}", elapsed);
+                // println!("trigger: {:?}", mtrigger_info.trigger);
+
+                if mtrigger_info.trigger == 0 || elapsed < next_internal {
+                    mtrigger_info.increase();
+                } else {
+                    mtrigger_info.reset();
+                    mtrigger_info.increase();
+                }
+                if mtrigger_info.trigger >= trigger {
+                    mtrigger_info.reset();
+                    true
+                } else {
+                    false
+                }
+            };
+            if need_trigger {
+                // println!("------------------------Trigger------------------------");
+                cb();
+            }
+        })
     }
 
     fn del_all_events(&self) {

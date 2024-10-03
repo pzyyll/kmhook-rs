@@ -145,6 +145,16 @@ pub trait EventListener {
     where
         F: Fn() + Send + Sync + 'static;
 
+    fn add_global_shortcut_trigger<F>(
+        &self,
+        shortcut: Shortcut,
+        cb: F,
+        trigger: u32,
+        internal: Option<u32>,
+    ) -> std::result::Result<ID, String>
+    where
+        F: Fn() + Send + Sync + 'static;
+
     fn add_event_listener<F>(
         &self,
         cb: F,

@@ -16,19 +16,41 @@ fn main() {
     );
 
     listener.add_global_shortcut(
-        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::ShiftLeft, KeyCode::UsA]).expect("Failed to create shortcut"),
+        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::ShiftLeft, KeyCode::UsA])
+            .expect("Failed to create shortcut"),
         || println!("Ctrl + Shift + A"),
     );
 
     listener.add_global_shortcut(
-        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::UsC, KeyCode::UsV]).expect("Failed to create shortcut"),
+        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::UsC, KeyCode::UsV])
+            .expect("Failed to create shortcut"),
         || println!("Ctrl + C + V"),
     );
 
     listener.add_global_shortcut(
-        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::UsV, KeyCode::UsC]).expect("Failed to create shortcut"),
+        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::UsV, KeyCode::UsC])
+            .expect("Failed to create shortcut"),
         || println!("Ctrl + V + C"),
     );
+
+    // listener.add_global_shortcut(Shortcut::new(vec![KeyCode::AltLeft]).unwrap(), || {
+    //     println!("Alt Left")
+    // });
+
+    listener.add_global_shortcut_trigger(
+        Shortcut::new(vec![KeyCode::AltLeft]).unwrap(),
+        || println!("Double Alt"),
+        2,
+        Some(400),
+    );
+
+    listener.add_global_shortcut_trigger(
+        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::UsC]).unwrap(),
+        || println!("Ctrl + C + C"),
+        2,
+        Some(400),
+    );
+
 
     // Illegal shortcut key
     // listener.add_global_shortcut(
