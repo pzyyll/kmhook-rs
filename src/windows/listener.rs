@@ -7,10 +7,11 @@
 //!
 //! Description: add msg listener
 
+use super::worker::{KeyboardSysMsg, MouseSysMsg, Worker, WorkerMsg};
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::result::Result;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, Weak};
 use std::thread::{self};
 use std::time::Instant;
@@ -19,14 +20,10 @@ use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
     TranslateMessage, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-    WM_MBUTTONUP, WM_MOUSEMOVE, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_USER,
+    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_QUIT, WM_USER,
 };
 
-use crate::types::{
-    EventType, KeyId, KeyInfo, KeyState, KeyboardState, MouseButton, MouseInfo, MouseStateFlags,
-    Pos, Shortcut, ID,
-};
+use crate::types::{EventType, KeyState, KeyboardState, Shortcut, ID};
 // use crate::windows::KeyIdFrom;
 use crate::consts;
 use crate::types::{EventListener, JoinHandleType};
@@ -99,44 +96,11 @@ impl EventLoop {
             kb
         );
 
-        let keyid = match KeyId::try_from(*kb) {
-            Ok(keyid) => keyid,
-            Err(_) => {
-                #[cfg(feature = "Debug")]
-                println!("keyid convert err {:?}", kb);
-                return CallNextHookEx(None, ncode, wparam, lparam);
-            }
-        };
-
-        let key_state = match wparam.0 as u32 {
-            WM_KEYDOWN | WM_SYSKEYDOWN => KeyState::Pressed,
-            _ => KeyState::Released,
-        };
-
-        let mut key = KeyInfo::new(keyid, key_state);
-        let mut old_state: Option<KeyboardState> = None;
-        LOCAL_KEYBOARD_STATE.with_borrow_mut(|state| {
-            old_state.replace(state.clone());
-            state.update_key(keyid.into(), key_state);
-            key.keyboard_state = Some(state.clone());
-            // println!("keyboard_state: {:?}", state);
-        });
-
-        if old_state == key.keyboard_state {
-            #[cfg(feature = "Debug")]
-            println!(
-                "{:?} keyboard_hook_proc same state {:?}",
-                std::thread::current().id(),
-                key
-            );
-            return CallNextHookEx(None, ncode, wparam, lparam);
-        }
-
-        let event_type = EventType::KeyboardEvent(Some(key));
+        let msg = WorkerMsg::KeyboardEvent(KeyboardSysMsg::new(wparam.0 as u32, *kb));
 
         let event_loops = { EVENT_LOOP_MANAGER.lock().unwrap().get_keyboard_event_loop() };
         for event_loop in event_loops.iter() {
-            event_loop.post_msg_to_worker(event_type.clone());
+            event_loop.post_msg_to_worker(msg.clone());
         }
 
         #[cfg(feature = "Debug")]
@@ -164,51 +128,11 @@ impl EventLoop {
                 minfo
             );
 
-            let pos = Pos {
-                x: minfo.pt.x,
-                y: minfo.pt.y,
-            };
+            let msg = WorkerMsg::MouseEvent(MouseSysMsg::new(mtype, *minfo));
 
-            let button = match mtype {
-                WM_LBUTTONDOWN => {
-                    println!("mouse_hook_proc ldown {:?}", minfo);
-                    Some((MouseButton::Left(MouseStateFlags::PRESSED),))
-                }
-                WM_LBUTTONUP => {
-                    // println!("mouse_hook_proc lup {:?}", minfo);
-                    Some((MouseButton::Left(MouseStateFlags::RELEASED),))
-                }
-                WM_RBUTTONDOWN => {
-                    // println!("mouse_hook_proc rdown {:?}", minfo);
-                    Some((MouseButton::Right(MouseStateFlags::PRESSED),))
-                }
-                WM_RBUTTONUP => {
-                    // println!("mouse_hook_proc rup {:?}", minfo);
-                    Some((MouseButton::Right(MouseStateFlags::RELEASED),))
-                }
-                WM_MBUTTONDOWN => {
-                    // println!("mouse_hook_proc mdown {:?}", minfo);
-                    Some((MouseButton::Middle(MouseStateFlags::PRESSED),))
-                }
-                WM_MBUTTONUP => {
-                    // println!("mouse_hook_proc mup {:?}", minfo);
-                    Some((MouseButton::Middle(MouseStateFlags::RELEASED),))
-                }
-                WM_MOUSEMOVE => {
-                    // println!("mouse_hook_proc move {:?}", minfo);
-                    Some((MouseButton::Move(MouseStateFlags::MOVEING),))
-                }
-                _ => None,
-            };
-
-            if let Some((button,)) = button {
-                // Handle the button event here
-                // println!("mouse_hook_proc {:?}", button);
-                let event_type = EventType::MouseEvent(Some(MouseInfo { button, pos }));
-                let event_loops = { EVENT_LOOP_MANAGER.lock().unwrap().get_mouse_event_loop() };
-                for event_loop in event_loops.iter() {
-                    event_loop.post_msg_to_worker(event_type.clone());
-                }
+            let event_loops = { EVENT_LOOP_MANAGER.lock().unwrap().get_mouse_event_loop() };
+            for event_loop in event_loops.iter() {
+                event_loop.post_msg_to_worker(msg.clone());
             }
 
             #[cfg(feature = "Debug")]
@@ -293,37 +217,14 @@ impl EventLoop {
     }
 
     fn recheck_hook(&self) {
-        if let Some(listener) = self.listener.upgrade().as_ref() {
-            let (mut set_keyboard_flag, mut set_mouse_flag) = (false, false);
-
-            if let Ok(event_map) = listener.event_map.lock().as_ref() {
-                for (_, (etype, _)) in event_map.iter() {
-                    match etype {
-                        EventType::All => {
-                            set_keyboard_flag = true;
-                            set_mouse_flag = true;
-                            break;
-                        }
-                        EventType::KeyboardEvent(_) => set_keyboard_flag = true,
-                        EventType::MouseEvent(_) => set_mouse_flag = true,
-                    }
-                    if set_keyboard_flag & set_mouse_flag {
-                        break;
-                    }
-                }
-            }
-
-            if let Ok(shortcut_map) = listener.shortcut_map.lock().as_ref() {
-                set_keyboard_flag = shortcut_map.len() > 0;
-            }
-
-            if set_keyboard_flag {
+        if let Some(listener) = self.listener.upgrade() {
+            if listener.has_keyboard_event() {
                 self.set_keyboard_hook();
             } else {
                 self.unhook_keyboard();
             }
 
-            if set_mouse_flag {
+            if listener.has_mouse_event() {
                 self.set_mouse_hook();
             } else {
                 self.unhook_mouse();
@@ -331,12 +232,12 @@ impl EventLoop {
         }
     }
 
-    fn post_msg_to_worker(&self, event_type: EventType) {
+    fn post_msg_to_worker(&self, msg: WorkerMsg) {
         #[cfg(feature = "Debug")]
         println!(
             "{:?} post_msg_to_worker {:?}",
             std::thread::current().id(),
-            event_type
+            msg
         );
 
         self.listener
@@ -347,7 +248,7 @@ impl EventLoop {
             .unwrap()
             .as_ref()
             .unwrap()
-            .post_msg(Some(event_type));
+            .post_msg(msg);
     }
 
     fn post_msg_to_loop(&self, msg_type: u32) {
@@ -487,60 +388,6 @@ lazy_static! {
     static ref EVENT_LOOP_MANAGER: Mutex<EventLoopManager> = Mutex::new(EventLoopManager::new());
 }
 
-struct Worker {
-    msg_sender: Mutex<Option<Sender<Option<EventType>>>>,
-    listener: Weak<Listener>,
-}
-
-impl Drop for Worker {
-    fn drop(&mut self) {
-        println!("Worker drop");
-    }
-}
-
-impl Worker {
-    fn new(listener: &Arc<Listener>) -> Self {
-        Self {
-            msg_sender: Mutex::new(None),
-            listener: Arc::downgrade(listener),
-        }
-    }
-
-    fn run(self: &Arc<Self>, with_thread: Option<bool>) -> Option<JoinHandleType> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        *self.msg_sender.lock().unwrap() = Some(tx);
-        let threading = with_thread.unwrap_or(false);
-
-        let listener = self.listener.clone();
-        let worker_loop = move || {
-            #[cfg(feature = "Debug")]
-            println!(
-                "Worker loop thread started with ID: {:?}",
-                std::thread::current().id()
-            );
-            while let Ok(Some(event_type)) = rx.recv() {
-                if let Some(listener) = listener.upgrade() {
-                    listener.on_event(event_type);
-                }
-            }
-            println!("Worker exit");
-        };
-
-        if threading {
-            Some(thread::spawn(worker_loop))
-        } else {
-            worker_loop();
-            None
-        }
-    }
-
-    fn post_msg(&self, event_type: Option<EventType>) {
-        if let Some(tx) = self.msg_sender.lock().unwrap().as_ref() {
-            let _ = tx.send(event_type);
-        }
-    }
-}
-
 #[derive(Debug)]
 struct ShortcutTriggerInfo {
     trigger: u32,
@@ -668,6 +515,32 @@ impl Listener {
             .unwrap()
             .post_msg_to_loop(WM_USER_RECHECK_HOOK);
     }
+
+    fn has_keyboard_event(&self) -> bool {
+        {
+            if !self.shortcut_map.lock().unwrap().is_empty() {
+                return true;
+            }
+        }
+
+        let binding = self.event_map.lock().unwrap();
+        for (_, (et, _)) in binding.iter() {
+            if matches!(et, EventType::KeyboardEvent(_) | EventType::All) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn has_mouse_event(&self) -> bool {
+        let binding = self.event_map.lock().unwrap();
+        for (_, (et, _)) in binding.iter() {
+            if matches!(et, EventType::MouseEvent(_) | EventType::All) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl Drop for Listener {
@@ -690,10 +563,7 @@ impl EventListener for Listener {
             .lock()
             .unwrap()
             .replace(EVENT_LOOP_MANAGER.lock().unwrap().new_event_loop(&rc));
-        rc.worker
-            .lock()
-            .unwrap()
-            .replace(Arc::new(Worker::new(&rc)));
+        rc.worker.lock().unwrap().replace(Arc::new(Worker::new()));
         rc
     }
 
@@ -706,7 +576,13 @@ impl EventListener for Listener {
         }
 
         if let Some(w) = self.get_worker() {
-            w.run(work_thread)
+            let _self = self.clone();
+            w.run(
+                move |event_type| {
+                    _self.on_event(event_type);
+                },
+                work_thread,
+            )
         } else {
             None
         }
@@ -715,7 +591,7 @@ impl EventListener for Listener {
     fn shutdown(&self) {
         self.del_all_events();
         if let Some(worker) = self.get_worker() {
-            worker.post_msg(None);
+            worker.post_msg(WorkerMsg::Stop);
         }
         if let Some(event_loop) = self.listener_event_loop.lock().unwrap().as_ref() {
             event_loop.stop();
