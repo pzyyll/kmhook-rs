@@ -59,9 +59,9 @@ fn main() {
     //     || println!("Ctrl + V + C + C"),
     // );
 
-    listener.startup(None);
+    // listener.startup(None);
     // work on thread
-    // if let Some(join) = listener.startup(Some(true)) {
-    //     join.join().unwrap();
-    // }
+    if let Some(join) = listener.startup(Some(true)) {
+        join.join().unwrap();
+    }
 }

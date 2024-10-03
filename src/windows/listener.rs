@@ -92,6 +92,9 @@ impl EventLoop {
         let kb = &*(lparam.0 as *const usize as *const KBDLLHOOKSTRUCT);
         // println!("keyboard_hook_proc {:?}", kb);
 
+        #[cfg(feature = "Debug")]
+        println!("{:?} keyboard_hook_proc trigger {:?}", std::thread::current().id(), kb);
+
         let keyid = match KeyId::try_from(*kb) {
             Ok(keyid) => keyid,
             Err(_) => {
@@ -126,6 +129,10 @@ impl EventLoop {
         for event_loop in event_loops.iter() {
             event_loop.post_msg_to_worker(event_type.clone());
         }
+
+        #[cfg(feature = "Debug")]
+        println!("{:?} keyboard_hook_proc trigger end call next", std::thread::current().id());
+
         CallNextHookEx(None, ncode, wparam, lparam)
     }
 
@@ -137,6 +144,9 @@ impl EventLoop {
         if ncode == HC_ACTION.try_into().unwrap() {
             let mtype = wparam.0 as u32;
             let minfo = &*(lparam.0 as *const usize as *const MSLLHOOKSTRUCT);
+
+            #[cfg(feature = "Debug")]
+            println!("{:?} mouse_hook_proc trigger {:?}", std::thread::current().id(), minfo);
 
             let pos = Pos {
                 x: minfo.pt.x,
@@ -184,6 +194,9 @@ impl EventLoop {
                     event_loop.post_msg_to_worker(event_type.clone());
                 }
             }
+
+            #[cfg(feature = "Debug")]
+            println!("{:?} mouse_hook_proc trigger end call next", std::thread::current().id());
         }
         CallNextHookEx(None, ncode, wparam, lparam)
     }
@@ -195,6 +208,13 @@ impl EventLoop {
         if let Ok(hhook) =
             unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(Self::keyboard_hook_proc), None, 0) }
         {
+            #[cfg(feature = "Debug")]
+            println!(
+                "{:?} set_keyboard_hook {:?}",
+                std::thread::current().id(),
+                hhook
+            );
+
             LOCAL_KEYBOARD_HHOOK.with_borrow_mut(|ids| {
                 ids.insert(self.id, hhook);
             });
@@ -212,6 +232,13 @@ impl EventLoop {
         if let Ok(hhook) =
             unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(Self::mouse_hook_proc), None, 0) }
         {
+            #[cfg(feature = "Debug")]
+            println!(
+                "{:?} set_mouse_hook {:?}",
+                std::thread::current().id(),
+                hhook
+            );
+
             LOCAL_MOUSE_HHOOK.with_borrow_mut(|ids| {
                 ids.insert(self.id, hhook);
             });
@@ -287,7 +314,11 @@ impl EventLoop {
 
     fn post_msg_to_worker(&self, event_type: EventType) {
         #[cfg(feature = "Debug")]
-        println!("{:?} post_msg_to_worker {:?}", std::thread::current().id(), event_type);
+        println!(
+            "{:?} post_msg_to_worker {:?}",
+            std::thread::current().id(),
+            event_type
+        );
 
         self.listener
             .upgrade()
@@ -302,7 +333,11 @@ impl EventLoop {
 
     fn post_msg_to_loop(&self, msg_type: u32) {
         #[cfg(feature = "Debug")]
-        println!("{:?} post_msg_to_loop {:?}", std::thread::current().id(), msg_type);
+        println!(
+            "{:?} post_msg_to_loop {:?}",
+            std::thread::current().id(),
+            msg_type
+        );
 
         let thread_id = {
             let binding = self.loop_thread_id.lock().unwrap();
@@ -324,6 +359,9 @@ impl EventLoop {
         let mut msg = MSG::default();
         unsafe {
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                #[cfg(feature = "Debug")]
+                println!("{:?} GetMessageW {:?}", std::thread::current().id(), msg);
+                
                 match msg.message {
                     WM_USER if msg.wParam.0 as u32 == WM_USER_RECHECK_HOOK => self.recheck_hook(),
                     _ => {
@@ -350,7 +388,10 @@ impl EventLoop {
         let event_loop = Arc::clone(self);
         let handle = thread::spawn(move || {
             #[cfg(feature = "Debug")]
-            println!("Event loop thread started with ID: {:?}", std::thread::current().id());
+            println!(
+                "Event loop thread started with ID: {:?}",
+                std::thread::current().id()
+            );
             event_loop.recheck_hook();
             event_loop.run();
         });
@@ -454,7 +495,10 @@ impl Worker {
         let listener = self.listener.clone();
         let worker_loop = move || {
             #[cfg(feature = "Debug")]
-            println!("Worker loop thread started with ID: {:?}", std::thread::current().id());
+            println!(
+                "Worker loop thread started with ID: {:?}",
+                std::thread::current().id()
+            );
             while let Ok(Some(event_type)) = rx.recv() {
                 if let Some(listener) = listener.upgrade() {
                     listener.on_event(event_type);
