@@ -738,13 +738,15 @@ impl EventListener for Listener {
         let next_internal = internal.unwrap_or(consts::DEFAULT_SHORTCUT_TRIGGER_INTERVAL) as u128;
 
         self.add_global_shortcut(shortcut, move || {
-            // println!("trigger: {:?}", Instant::now());
+            #[cfg(feature = "Debug")]
+            println!("global_shortcut trigger: {:?}", Instant::now());
+
             let need_trigger = {
                 let mut mtrigger_info = trigger_info.lock().unwrap();
 
                 let elapsed = mtrigger_info.last_trigger_time.elapsed().as_millis();
-                // println!("elapsed: {:?}", elapsed);
-                // println!("trigger: {:?}", mtrigger_info.trigger);
+                #[cfg(feature = "Debug")]
+                println!("trigger times: {:?}, elapsed: {:?}", mtrigger_info.trigger, elapsed);
 
                 if mtrigger_info.trigger == 0 || elapsed < next_internal {
                     mtrigger_info.increase();
@@ -760,8 +762,9 @@ impl EventListener for Listener {
                 }
             };
             if need_trigger {
-                // println!("------------------------Trigger------------------------");
                 cb();
+                #[cfg(feature = "Debug")]
+                println!("------------------------Trigger------------------------{:?}", Instant::now());
             }
         })
     }
