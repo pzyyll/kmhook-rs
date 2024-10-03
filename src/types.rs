@@ -124,6 +124,10 @@ impl Shortcut {
         })
     }
 
+    pub fn usb_input(&self) -> &Vec<u8> {
+        &self._keyboard_state_usb_input
+    }
+
     pub fn is_input_match(&self, usb_input: &Vec<u8>) -> bool {
         self._keyboard_state_usb_input == *usb_input
     }

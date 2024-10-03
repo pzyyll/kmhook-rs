@@ -655,10 +655,18 @@ impl EventListener for Listener {
         F: Fn() + Send + Sync + 'static,
     {
         let id = self.gen_id();
-        self.shortcut_map
-            .lock()
-            .unwrap()
-            .insert(id, (shortcut, Arc::new(Box::new(cb))));
+        {
+            let mut binding = self.shortcut_map.lock().unwrap();
+            for (_, (sc, _)) in binding.iter() {
+                println!("sc usb_input: {:?}", sc.usb_input());
+                println!("shortcut usb_input: {:?}", shortcut.usb_input());
+                if sc.is_input_match(shortcut.usb_input()) {
+                    return Err("Shortcut already exists".to_string());
+                }
+            }
+            binding.insert(id, (shortcut, Arc::new(Box::new(cb))));
+        }
+
         self.post_recheck_hook();
         Ok(id)
     }
