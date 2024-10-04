@@ -10,7 +10,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
-use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::System::Threading::{
+    GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
     TranslateMessage, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
@@ -20,6 +22,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 thread_local! {
     static LOCAL_KEYBOARD_HHOOK: RefCell<HashMap<ID, HHOOK>> = RefCell::new(HashMap::new());
     static LOCAL_MOUSE_HHOOK: RefCell<HashMap<ID, HHOOK>> = RefCell::new(HashMap::new());
+    static LOCAL_KEY_LAST_TIME: RefCell<u32> = RefCell::new(0);
 }
 
 #[derive(Debug)]
@@ -57,7 +60,23 @@ impl EventLoop {
         }
 
         let kb = &*(lparam.0 as *const usize as *const KBDLLHOOKSTRUCT);
-        // println!("keyboard_hook_proc {:?}", kb);
+        let mut is_repeat = false;
+        LOCAL_KEY_LAST_TIME.with(|last_time| {
+            let mut last_time = last_time.borrow_mut();
+            let current_time = kb.time;
+            if *last_time == current_time {
+                is_repeat = true;
+            }
+            *last_time = current_time;
+        });
+        if is_repeat {
+            println!(
+                "{:?} keyboard_hook_proc is repeat {:?}",
+                std::thread::current().id(),
+                kb
+            );
+            return CallNextHookEx(None, ncode, wparam, lparam);
+        }
 
         #[cfg(feature = "Debug")]
         println!(
@@ -240,6 +259,13 @@ impl EventLoop {
     fn run(&self) {
         {
             *self.loop_thread_id.lock().unwrap() = unsafe { GetCurrentThreadId() };
+        }
+        unsafe {
+            let thread_handle = GetCurrentThread();
+            if SetThreadPriority(thread_handle, THREAD_PRIORITY_HIGHEST).is_err() {
+                #[cfg(feature = "Debug")]
+                println!("SetThreadPriority failed {:?}", thread_handle);
+            }
         }
 
         let mut msg = MSG::default();
