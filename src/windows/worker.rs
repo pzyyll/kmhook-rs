@@ -125,12 +125,16 @@ impl Worker {
 
     pub fn run<F>(self: &Arc<Self>, handle: F, with_thread: Option<bool>) -> Option<JoinHandleType>
     where
-        F: Fn(EventType) + Send + 'static,
+        F: Fn(EventType) + Send + Sync + 'static,
     {
         let (tx, rx) = std::sync::mpsc::channel();
-        *self.msg_sender.lock().unwrap() = Some(tx);
-        let threading = with_thread.unwrap_or(false);
+        {
+            let mut msg_sender = self.msg_sender.lock().unwrap();
+            *msg_sender = Some(tx);
+        }
+        let threading = with_thread.unwrap_or(true);
 
+        let handle = Arc::new(handle);
         let worker_loop = move || {
             #[cfg(feature = "Debug")]
             println!(
@@ -138,20 +142,19 @@ impl Worker {
                 std::thread::current().id()
             );
             while let Ok(msg) = rx.recv() {
-                match msg {
-                    WorkerMsg::Stop => break,
-                    _ => {
-                        if let Some(event) = msg.translate_msg() {
-                            handle(event);
-                        } else {
-                            #[cfg(feature = "Debug")]
-                            println!(
-                                "Worker loop thread({:?}) translate_msg failed. {:?}",
-                                std::thread::current().id(),
-                                msg
-                            );
-                        }
-                    }
+                if let WorkerMsg::Stop = msg {
+                    break;
+                }
+                if let Some(event) = msg.translate_msg() {
+                    let handle = Arc::clone(&handle);
+                    thread::spawn(move || handle(event));
+                } else {
+                    #[cfg(feature = "Debug")]
+                    println!(
+                        "Worker loop thread({:?}) translate_msg failed. {:?}",
+                        std::thread::current().id(),
+                        msg
+                    );
                 }
             }
             #[cfg(feature = "Debug")]

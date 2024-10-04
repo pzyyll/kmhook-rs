@@ -1,4 +1,6 @@
 #![allow(warnings)]
+use std::time::Duration;
+
 use kmhook_rs::types::*;
 use kmhook_rs::*;
 
@@ -41,8 +43,11 @@ fn main() {
 
     listener.add_global_shortcut_trigger(
         Shortcut::new(vec![KeyCode::AltLeft]).unwrap(),
-        || println!("Triple Alt"),
-        3,
+        || {
+            println!("》》》》》》》》》》》Triple Alt {:?}", std::thread::current().id());
+            std::thread::sleep(Duration::from_millis(1000));
+        },
+        2,
         Some(400),
     );
 
