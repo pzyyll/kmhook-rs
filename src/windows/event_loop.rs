@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Threading::{
-    GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+    GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST, THREAD_PRIORITY_TIME_CRITICAL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
@@ -262,7 +262,7 @@ impl EventLoop {
         }
         unsafe {
             let thread_handle = GetCurrentThread();
-            if SetThreadPriority(thread_handle, THREAD_PRIORITY_HIGHEST).is_err() {
+            if SetThreadPriority(thread_handle, THREAD_PRIORITY_TIME_CRITICAL).is_err() {
                 #[cfg(feature = "Debug")]
                 println!("SetThreadPriority failed {:?}", thread_handle);
             }
