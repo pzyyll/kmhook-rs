@@ -10,8 +10,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::LibraryLoader::{GetModuleHandleExW, GetModuleHandleW};
 use windows::Win32::System::Threading::{
-    GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST, THREAD_PRIORITY_TIME_CRITICAL,
+    GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+    THREAD_PRIORITY_TIME_CRITICAL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
@@ -137,9 +139,10 @@ impl EventLoop {
         if LOCAL_KEYBOARD_HHOOK.with_borrow(|ids| ids.contains_key(&self.id)) {
             return;
         }
-        if let Ok(hhook) =
-            unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(Self::keyboard_hook_proc), None, 0) }
-        {
+        if let Ok(hhook) = unsafe {
+            let handle = GetModuleHandleW(None).unwrap();
+            SetWindowsHookExW(WH_KEYBOARD_LL, Some(Self::keyboard_hook_proc), handle, 0)
+        } {
             #[cfg(feature = "Debug")]
             println!(
                 "{:?} set_keyboard_hook {:?}",
