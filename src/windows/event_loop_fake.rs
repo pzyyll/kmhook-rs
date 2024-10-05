@@ -172,7 +172,7 @@ impl EventLoop {
             return;
         }
 
-        let mut pos = Pos::default();
+        let mut pos = Pos { x: lppoint.x, y: lppoint.y };
         let mut rel_pos = Pos::default();
         if pos_flags & MOUSE_MOVE_ABSOLUTE.0 > 0 {
             let mut rect = RECT::default();
@@ -206,8 +206,8 @@ impl EventLoop {
             pos.x = absolute_x;
             pos.y = absolute_y;
         } else if last_x != 0 || last_y != 0 {
-            pos.x = lppoint.x + last_x;
-            pos.y = lppoint.y + last_y;
+            pos.x += last_x;
+            pos.y += last_y;
             rel_pos.x = last_x;
             rel_pos.y = last_y;
 
