@@ -12,7 +12,6 @@ bitflags! {
     pub struct MouseStateFlags: u32 {
         const PRESSED = 0b0001;
         const RELEASED = 0b0010;
-        const MOVEING = 0b0100;
         // const DRAG_START = 0b0100;
         // const DRAG_END = 0b1000;
         // const DRAGGING = 0b10000;
@@ -57,7 +56,8 @@ pub enum MouseButton {
     Left(MouseStateFlags),
     Right(MouseStateFlags),
     Middle(MouseStateFlags),
-    Move(MouseStateFlags),
+    X1(MouseStateFlags),
+    X2(MouseStateFlags),
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -79,7 +79,7 @@ impl KeyInfo {
     }
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Default)]
 pub struct Pos {
     pub x: i32,
     pub y: i32,
@@ -87,8 +87,9 @@ pub struct Pos {
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub struct MouseInfo {
-    pub button: MouseButton,
+    pub button: Option<MouseButton>,
     pub pos: Pos,
+    pub relative_pos: Pos,
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]

@@ -6,11 +6,16 @@
 //! Created Data: 2024-09-29
 //!
 //! Description: This is a windows event listener library.
+#![allow(incomplete_features)]
 
 pub mod listener;
 pub mod types_ext;
 
-pub(crate) mod event_loop;
+// #[cfg(all(feature = "Fake", not(feature = "DLL")))]
+#[path = "event_loop_fake.rs"]
+mod event_loop;
+
+
 pub(crate) mod worker;
 
 // pub trait KeyIdFrom {

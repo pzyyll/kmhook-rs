@@ -1,3 +1,5 @@
+// depreated
+
 use crate::types::ID;
 use crate::utils::gen_id;
 use crate::windows::worker::{KeyboardSysMsg, MouseSysMsg, WorkerMsg};
@@ -10,15 +12,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
-use windows::Win32::System::LibraryLoader::{GetModuleHandleExW, GetModuleHandleW};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{
-    GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
-    THREAD_PRIORITY_TIME_CRITICAL,
+    GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_QUIT, WM_USER,
+    TranslateMessage, UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, KF_REPEAT, KF_UP,
+    MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_QUIT, WM_USER,
 };
 
 thread_local! {
@@ -62,23 +63,26 @@ impl EventLoop {
         }
 
         let kb = &*(lparam.0 as *const usize as *const KBDLLHOOKSTRUCT);
-        let mut is_repeat = false;
-        LOCAL_KEY_LAST_TIME.with(|last_time| {
-            let mut last_time = last_time.borrow_mut();
-            let current_time = kb.time;
-            if *last_time == current_time {
-                is_repeat = true;
-            }
-            *last_time = current_time;
-        });
-        if is_repeat {
-            println!(
-                "{:?} keyboard_hook_proc is repeat {:?}",
-                std::thread::current().id(),
-                kb
-            );
-            return CallNextHookEx(None, ncode, wparam, lparam);
-        }
+        let is_repeat = kb.flags.0 & KF_REPEAT;
+        let is_up = kb.flags.0 & KF_UP;
+        println!("is_repeat {:?}, is_up: {:?}", is_repeat, is_up);
+        // let mut is_repeat = false;
+        // LOCAL_KEY_LAST_TIME.with(|last_time| {
+        //     let mut last_time = last_time.borrow_mut();
+        //     let current_time = kb.time;
+        //     if *last_time == current_time {
+        //         is_repeat = true;
+        //     }
+        //     *last_time = current_time;
+        // });
+        // if is_repeat {
+        //     println!(
+        //         "{:?} keyboard_hook_proc is repeat {:?}",
+        //         std::thread::current().id(),
+        //         kb
+        //     );
+        //     return CallNextHookEx(None, ncode, wparam, lparam);
+        // }
 
         #[cfg(feature = "Debug")]
         println!(

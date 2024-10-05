@@ -1,27 +1,20 @@
 use crate::types::KeyId;
 use windows::Win32::UI::{
-    Input::KeyboardAndMouse::{
-        VIRTUAL_KEY, VK_LCONTROL, VK_LMENU, VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RWIN,
+    Input::{
+        KeyboardAndMouse::{
+            MapVirtualKeyW, MAPVK_VK_TO_VSC_EX, VIRTUAL_KEY, VK_LCONTROL, VK_LMENU, VK_LWIN,
+            VK_RCONTROL, VK_RMENU, VK_RWIN,
+        },
+        RAWKEYBOARD,
     },
-    WindowsAndMessaging::KBDLLHOOKSTRUCT,
+    WindowsAndMessaging::{KBDLLHOOKSTRUCT, RI_KEY_E0, RI_KEY_E1},
 };
 
 impl KeyId {
-    fn from_win(scancode: u32, vkcode: u32) -> std::result::Result<Self, ()> {
-        match VIRTUAL_KEY(vkcode as u16) {
-            VK_LWIN => Ok(Self(crate::types::KeyCode::MetaLeft)),
-            VK_RWIN => Ok(Self(crate::types::KeyCode::MetaRight)),
-            VK_LCONTROL => Ok(Self(crate::types::KeyCode::ControlLeft)),
-            VK_RCONTROL => Ok(Self(crate::types::KeyCode::ControlRight)),
-            VK_LMENU => Ok(Self(crate::types::KeyCode::AltLeft)),
-            VK_RMENU => Ok(Self(crate::types::KeyCode::AltRight)),
-            _ => {
-                let keymap = crate::types::KeyMap::from_key_mapping(keycode::KeyMapping::Win(
-                    scancode as u16,
-                ))?;
-                Ok(Self(crate::types::KeyCode::from(keymap.id)))
-            }
-        }
+    fn from_scan_code(scancode: u32) -> std::result::Result<Self, ()> {
+        let keymap =
+            crate::types::KeyMap::from_key_mapping(keycode::KeyMapping::Win(scancode as u16))?;
+        Ok(Self(crate::types::KeyCode::from(keymap.id)))
     }
 }
 
@@ -31,6 +24,34 @@ impl TryFrom<KBDLLHOOKSTRUCT> for KeyId {
     fn try_from(value: KBDLLHOOKSTRUCT) -> Result<Self, Self::Error> {
         let scancode = value.scanCode;
         let vkcode = value.vkCode;
-        KeyId::from_win(scancode, vkcode)
+        match VIRTUAL_KEY(vkcode as u16) {
+            VK_LWIN => Ok(Self(crate::types::KeyCode::MetaLeft)),
+            VK_RWIN => Ok(Self(crate::types::KeyCode::MetaRight)),
+            VK_LCONTROL => Ok(Self(crate::types::KeyCode::ControlLeft)),
+            VK_RCONTROL => Ok(Self(crate::types::KeyCode::ControlRight)),
+            VK_LMENU => Ok(Self(crate::types::KeyCode::AltLeft)),
+            VK_RMENU => Ok(Self(crate::types::KeyCode::AltRight)),
+            _ => Self::from_scan_code(scancode),
+        }
+    }
+}
+
+impl TryFrom<RAWKEYBOARD> for KeyId {
+    type Error = ();
+
+    fn try_from(keyboard: RAWKEYBOARD) -> Result<Self, Self::Error> {
+        let scancode = if keyboard.MakeCode != 0 {
+            (keyboard.MakeCode as u32 & 0x7f)
+                | ((if keyboard.Flags as u32 & RI_KEY_E0 != 0 {
+                    0xe0
+                } else if keyboard.Flags as u32 & RI_KEY_E1 != 0 {
+                    0xe1
+                } else {
+                    0x00
+                }) << 8)
+        } else {
+            unsafe { MapVirtualKeyW(keyboard.VKey as u32, MAPVK_VK_TO_VSC_EX) & 0xFFFF }
+        };
+        Self::from_scan_code(scancode)
     }
 }

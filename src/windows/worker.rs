@@ -22,26 +22,20 @@ thread_local! {
 
 #[derive(Debug, Clone)]
 pub(crate) struct KeyboardSysMsg {
-    state: u32,
-    hook_data: KBDLLHOOKSTRUCT,
+    key_info: KeyInfo,
 }
 
 impl KeyboardSysMsg {
-    pub fn new(state: u32, hook_data: KBDLLHOOKSTRUCT) -> Self {
-        Self { state, hook_data }
+    pub fn new(key_info: KeyInfo) -> Self {
+        Self { key_info }
     }
 
     fn translate_msg(&self) -> Option<EventType> {
-        let keyid = KeyId::try_from(self.hook_data).ok()?;
-        let key_state = match self.state {
-            WM_KEYDOWN | WM_SYSKEYDOWN => KeyState::Pressed,
-            _ => KeyState::Released,
-        };
-        let mut key = KeyInfo::new(keyid, key_state);
+        let mut key = self.key_info.clone();
         let mut old_state: Option<KeyboardState> = None;
         LOCAL_KEYBOARD_STATE.with(|state| {
             old_state.replace(state.borrow().clone());
-            state.borrow_mut().update_key(keyid.into(), key_state);
+            state.borrow_mut().update_key(key.key_id.into(), key.state);
             key.keyboard_state = Some(state.borrow().clone());
         });
 
@@ -55,37 +49,16 @@ impl KeyboardSysMsg {
 
 #[derive(Debug, Clone)]
 pub(crate) struct MouseSysMsg {
-    state: u32,
-    hook_data: MSLLHOOKSTRUCT,
+    mouse_info: MouseInfo,
 }
 
 impl MouseSysMsg {
-    pub fn new(state: u32, hook_data: MSLLHOOKSTRUCT) -> Self {
-        Self { state, hook_data }
+    pub fn new(mouse_info: MouseInfo) -> Self {
+        Self { mouse_info }
     }
 
     fn translate_msg(&self) -> Option<EventType> {
-        let minfo = &self.hook_data;
-        let pos = Pos {
-            x: minfo.pt.x,
-            y: minfo.pt.y,
-        };
-
-        let button = match self.state {
-            WM_LBUTTONDOWN => Some(MouseButton::Left(MouseStateFlags::PRESSED)),
-            WM_LBUTTONUP => Some(MouseButton::Left(MouseStateFlags::RELEASED)),
-            WM_RBUTTONDOWN => Some(MouseButton::Right(MouseStateFlags::PRESSED)),
-            WM_RBUTTONUP => Some(MouseButton::Right(MouseStateFlags::RELEASED)),
-            WM_MBUTTONDOWN => Some(MouseButton::Middle(MouseStateFlags::PRESSED)),
-            WM_MBUTTONUP => Some(MouseButton::Middle(MouseStateFlags::RELEASED)),
-            WM_MOUSEMOVE => Some(MouseButton::Move(MouseStateFlags::MOVEING)),
-            _ => None,
-        };
-
-        if let Some(button) = button {
-            return Some(EventType::MouseEvent(Some(MouseInfo { button, pos })));
-        }
-        None
+        Some(EventType::MouseEvent(Some(self.mouse_info.clone())))
     }
 }
 
@@ -146,8 +119,9 @@ impl Worker {
                     break;
                 }
                 if let Some(event) = msg.translate_msg() {
-                    let handle = Arc::clone(&handle);
-                    thread::spawn(move || handle(event));
+                    handle(event);
+                    // let handle = Arc::clone(&handle);
+                    // thread::spawn(move || handle(event));
                 } else {
                     #[cfg(feature = "Debug")]
                     println!(

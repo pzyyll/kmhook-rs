@@ -20,7 +20,6 @@ fn main() {
                 );
                 if info.key_id == KeyId::from(KeyCode::UsA) {
                     println!("Pressed A");
-
                 } else if info.key_id == KeyId::from(KeyCode::Escape) {
                     println!("Pressed Escape");
                     l.as_ref().shutdown();
@@ -31,6 +30,18 @@ fn main() {
         Some(EventType::KeyboardEvent(None)),
     );
     println!("{:?}", result);
+
+    listener.add_event_listener(
+        move |event_type| match event_type {
+            EventType::MouseEvent(Some(info)) => {
+                println!("Mouse Button {:?}", info.button);
+                println!("Mouse Position {:?}", info.pos);
+                println!("Mouse State {:?}", info.relative_pos);
+            }
+            _ => {}
+        },
+        Some(EventType::MouseEvent(None)),
+    );
 
     if let Some(join) = listener.startup(Some(true)) {
         join.join().unwrap();
