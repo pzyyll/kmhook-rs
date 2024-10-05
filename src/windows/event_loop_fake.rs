@@ -165,6 +165,7 @@ impl EventLoop {
         };
 
         if btn.is_none() && button_flags != 0 {
+            #[cfg(feature = "Debug")]
             println!(
                 "Currently, mouse button events are not supported. {:?}",
                 button_flags
