@@ -1,4 +1,7 @@
-use crate::types::{KeyId, KeyInfo, KeyState, MouseButton, MouseInfo, MouseStateFlags, Pos, ID};
+use crate::consts;
+use crate::types::{
+    KeyId, KeyInfo, KeyState, KeyboardState, MouseButton, MouseInfo, MouseStateFlags, Pos, ID,
+};
 use crate::utils::gen_id;
 use crate::windows::types_ext;
 use crate::windows::worker::{KeyboardSysMsg, MouseSysMsg, WorkerMsg};
@@ -43,6 +46,7 @@ thread_local! {
     static LOCAL_MOUSE_HHOOK: RefCell<HashMap<ID, HHOOK>> = RefCell::new(HashMap::new());
     static LOCAL_KEY_LAST_TIME: RefCell<u32> = RefCell::new(0);
     static LOCAL_HWDN: RefCell<HashMap<ID, HWND>> = RefCell::new(HashMap::new());
+    static LOCAL_KEYBOARD_STATE: RefCell<KeyboardState> = RefCell::new(KeyboardState::new(Some(consts::MAX_KEYS)));
 }
 
 #[derive(Debug)]
@@ -87,7 +91,7 @@ impl EventLoop {
             return;
         }
         let key_id = key_id.unwrap();
-        let key_info = KeyInfo::new(
+        let mut key_info = KeyInfo::new(
             key_id,
             if key_up {
                 KeyState::Released
@@ -95,6 +99,19 @@ impl EventLoop {
                 KeyState::Pressed
             },
         );
+
+        let mut old_state: Option<KeyboardState> = None;
+        LOCAL_KEYBOARD_STATE.with(|state| {
+            old_state.replace(state.borrow().clone());
+            state.borrow_mut().update_key(key_id.into(), key_info.state);
+            key_info.keyboard_state.replace(state.borrow().clone())
+        });
+
+        if old_state == key_info.keyboard_state {
+            #[cfg(feature = "Debug")]
+            println!("Key State not changed {:?}", key_info);
+            return;
+        }
 
         #[cfg(feature = "Debug")]
         println!("kbd: vk_code={:?} key_info={:?}", keyboard.VKey, key_info);
@@ -173,7 +190,10 @@ impl EventLoop {
             return;
         }
 
-        let mut pos = Pos { x: lppoint.x, y: lppoint.y };
+        let mut pos = Pos {
+            x: lppoint.x,
+            y: lppoint.y,
+        };
         let mut rel_pos = Pos::default();
         if pos_flags & MOUSE_MOVE_ABSOLUTE.0 > 0 {
             let mut rect = RECT::default();

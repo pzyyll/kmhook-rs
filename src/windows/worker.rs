@@ -32,16 +32,16 @@ impl KeyboardSysMsg {
 
     fn translate_msg(&self) -> Option<EventType> {
         let mut key = self.key_info.clone();
-        let mut old_state: Option<KeyboardState> = None;
-        LOCAL_KEYBOARD_STATE.with(|state| {
-            old_state.replace(state.borrow().clone());
-            state.borrow_mut().update_key(key.key_id.into(), key.state);
-            key.keyboard_state = Some(state.borrow().clone());
-        });
+        // let mut old_state: Option<KeyboardState> = None;
+        // LOCAL_KEYBOARD_STATE.with(|state| {
+        //     old_state.replace(state.borrow().clone());
+        //     state.borrow_mut().update_key(key.key_id.into(), key.state);
+        //     key.keyboard_state = Some(state.borrow().clone());
+        // });
 
-        if old_state == key.keyboard_state {
-            return None;
-        }
+        // if old_state == key.keyboard_state {
+        //     return None;
+        // }
 
         Some(EventType::KeyboardEvent(Some(key)))
     }
