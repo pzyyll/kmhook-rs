@@ -384,7 +384,7 @@ impl EventLoop {
     fn init_fake_win(&self) -> std::result::Result<(), ()> {
         let hinstance = unsafe { GetModuleHandleW(None).unwrap().into() };
         let class_name: Vec<u16> =
-            std::os::windows::ffi::OsStrExt::encode_wide(std::ffi::OsStr::new("hotkey_fake_win"))
+            std::os::windows::ffi::OsStrExt::encode_wide(std::ffi::OsStr::new("kmhook_app"))
                 .chain(std::iter::once(0))
                 .collect();
         let wnd_class = WNDCLASSW {
