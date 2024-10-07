@@ -13,12 +13,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::consts;
 use crate::types::{
     EventType, JoinHandleType, KeyId, KeyInfo, KeyState, KeyboardState, MouseButton, MouseInfo,
-    MouseStateFlags, Pos,
+    ClickState, Pos,
 };
-
-thread_local! {
-    static LOCAL_KEYBOARD_STATE: RefCell<KeyboardState> = RefCell::new(KeyboardState::new(Some(consts::MAX_KEYS)));
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct KeyboardSysMsg {
@@ -32,17 +28,6 @@ impl KeyboardSysMsg {
 
     fn translate_msg(&self) -> Option<EventType> {
         let mut key = self.key_info.clone();
-        // let mut old_state: Option<KeyboardState> = None;
-        // LOCAL_KEYBOARD_STATE.with(|state| {
-        //     old_state.replace(state.borrow().clone());
-        //     state.borrow_mut().update_key(key.key_id.into(), key.state);
-        //     key.keyboard_state = Some(state.borrow().clone());
-        // });
-
-        // if old_state == key.keyboard_state {
-        //     return None;
-        // }
-
         Some(EventType::KeyboardEvent(Some(key)))
     }
 }

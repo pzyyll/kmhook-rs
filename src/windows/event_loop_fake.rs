@@ -1,6 +1,5 @@
-use crate::consts;
 use crate::types::{
-    KeyId, KeyInfo, KeyState, KeyboardState, MouseButton, MouseInfo, MouseStateFlags, Pos, ID,
+    ClickState, KeyId, KeyInfo, KeyState, MouseButton, MouseInfo, Pos, Shortcut, ID,
 };
 use crate::utils::gen_id;
 use crate::windows::worker::{KeyboardSysMsg, MouseSysMsg, WorkerMsg};
@@ -44,7 +43,8 @@ thread_local! {
     static LOCAL_MOUSE_HHOOK: RefCell<HashMap<ID, HHOOK>> = RefCell::new(HashMap::new());
     static LOCAL_KEY_LAST_TIME: RefCell<u32> = RefCell::new(0);
     static LOCAL_HWDN: RefCell<HashMap<ID, HWND>> = RefCell::new(HashMap::new());
-    static LOCAL_KEYBOARD_STATE: RefCell<KeyboardState> = RefCell::new(KeyboardState::new(Some(consts::MAX_KEYS)));
+    // static LOCAL_KEYBOARD_STATE: RefCell<KeyboardState> = RefCell::new(KeyboardState::new(Some(consts::MAX_KEYS)));
+    static LOCAL_KEYBOARD_STATE_S: RefCell<Shortcut> = RefCell::new(Shortcut::default());
 }
 
 #[derive(Debug)]
@@ -83,7 +83,7 @@ impl EventLoop {
             return;
         }
 
-        let key_id = KeyId::try_from(*keyboard);
+        let key_id: Result<KeyId, _> = KeyId::try_from(*keyboard);
         if key_id.is_err() {
             println!("Get KeyID failed {:?}", keyboard);
             return;
@@ -98,11 +98,22 @@ impl EventLoop {
             },
         );
 
-        let mut old_state: Option<KeyboardState> = None;
-        LOCAL_KEYBOARD_STATE.with(|state| {
+        // let mut old_state: Option<KeyboardState> = None;
+        // LOCAL_KEYBOARD_STATE.with(|state| {
+        //     old_state.replace(state.borrow().clone());
+        //     state.borrow_mut().update_key(key_id.into(), key_info.state);
+        //     key_info.keyboard_state.replace(state.borrow().clone())
+        // });
+
+        let mut old_state: Option<Shortcut> = None;
+        LOCAL_KEYBOARD_STATE_S.with(|state| {
             old_state.replace(state.borrow().clone());
-            state.borrow_mut().update_key(key_id.into(), key_info.state);
-            key_info.keyboard_state.replace(state.borrow().clone())
+            if key_info.state == KeyState::Pressed {
+                state.borrow_mut().set_key(key_id.into())
+            } else {
+                state.borrow_mut().remove_key(key_id.into())
+            }
+            key_info.keyboard_state.replace(state.borrow().clone());
         });
 
         if old_state == key_info.keyboard_state {
@@ -138,43 +149,43 @@ impl EventLoop {
         let btn = match button_flags as u32 {
             RI_MOUSE_LEFT_BUTTON_DOWN => {
                 // println!("Left mouse button down {:?}", lppoint);
-                Some(MouseButton::Left(MouseStateFlags::PRESSED))
+                Some(MouseButton::Left(ClickState::Pressed))
             }
             RI_MOUSE_LEFT_BUTTON_UP => {
                 // println!("Left mouse button up {:?}", lppoint);
-                Some(MouseButton::Left(MouseStateFlags::RELEASED))
+                Some(MouseButton::Left(ClickState::Released))
             }
             RI_MOUSE_RIGHT_BUTTON_DOWN => {
                 // println!("Right mouse button down {:?}", lppoint);
-                Some(MouseButton::Right(MouseStateFlags::PRESSED))
+                Some(MouseButton::Right(ClickState::Pressed))
             }
             RI_MOUSE_RIGHT_BUTTON_UP => {
                 // println!("Right mouse button up {:?}", lppoint);
-                Some(MouseButton::Right(MouseStateFlags::RELEASED))
+                Some(MouseButton::Right(ClickState::Released))
             }
             RI_MOUSE_MIDDLE_BUTTON_DOWN => {
                 // println!("Middle mouse button down {:?}", lppoint);
-                Some(MouseButton::Middle(MouseStateFlags::PRESSED))
+                Some(MouseButton::Middle(ClickState::Pressed))
             }
             RI_MOUSE_MIDDLE_BUTTON_UP => {
                 // println!("Middle mouse button up {:?}", lppoint);
-                Some(MouseButton::Middle(MouseStateFlags::RELEASED))
+                Some(MouseButton::Middle(ClickState::Released))
             }
             RI_MOUSE_BUTTON_4_DOWN => {
                 // println!("X1 mouse button down {:?}", lppoint);
-                Some(MouseButton::X1(MouseStateFlags::PRESSED))
+                Some(MouseButton::X1(ClickState::Pressed))
             }
             RI_MOUSE_BUTTON_4_UP => {
                 // println!("X1 mouse button up {:?}", lppoint);
-                Some(MouseButton::X1(MouseStateFlags::RELEASED))
+                Some(MouseButton::X1(ClickState::Released))
             }
             RI_MOUSE_BUTTON_5_DOWN => {
                 // println!("X2 mouse button down {:?}", lppoint);
-                Some(MouseButton::X2(MouseStateFlags::PRESSED))
+                Some(MouseButton::X2(ClickState::Pressed))
             }
             RI_MOUSE_BUTTON_5_UP => {
                 // println!("X2 mouse button up {:?}", lppoint);
-                Some(MouseButton::X2(MouseStateFlags::RELEASED))
+                Some(MouseButton::X2(ClickState::Released))
             }
             _ => None,
         };

@@ -1,4 +1,4 @@
-use crate::types::KeyId;
+use crate::types::{KeyId, KeyMap, VirtualKeyId};
 use windows::Win32::UI::{
     Input::{
         KeyboardAndMouse::{
@@ -12,9 +12,12 @@ use windows::Win32::UI::{
 
 impl KeyId {
     fn from_scan_code(scancode: u32) -> std::result::Result<Self, ()> {
-        let keymap =
-            crate::types::KeyMap::from_key_mapping(keycode::KeyMapping::Win(scancode as u16))?;
-        Ok(Self(crate::types::KeyCode::from(keymap.id)))
+        let keymap = KeyMap::from_key_mapping(keycode::KeyMapping::Win(scancode as u16))?;
+        if let Ok(vk) = VirtualKeyId::try_from(keymap.id) {
+            Ok(Self(vk))
+        } else {
+            Err(())
+        }
     }
 }
 
@@ -25,12 +28,12 @@ impl TryFrom<KBDLLHOOKSTRUCT> for KeyId {
         let scancode = value.scanCode;
         let vkcode = value.vkCode;
         match VIRTUAL_KEY(vkcode as u16) {
-            VK_LWIN => Ok(Self(crate::types::KeyCode::MetaLeft)),
-            VK_RWIN => Ok(Self(crate::types::KeyCode::MetaRight)),
-            VK_LCONTROL => Ok(Self(crate::types::KeyCode::ControlLeft)),
-            VK_RCONTROL => Ok(Self(crate::types::KeyCode::ControlRight)),
-            VK_LMENU => Ok(Self(crate::types::KeyCode::AltLeft)),
-            VK_RMENU => Ok(Self(crate::types::KeyCode::AltRight)),
+            VK_LWIN => Ok(Self(VirtualKeyId::MetaLeft)),
+            VK_RWIN => Ok(Self(VirtualKeyId::MetaRight)),
+            VK_LCONTROL => Ok(Self(VirtualKeyId::ControlLeft)),
+            VK_RCONTROL => Ok(Self(VirtualKeyId::ControlRight)),
+            VK_LMENU => Ok(Self(VirtualKeyId::AltLeft)),
+            VK_RMENU => Ok(Self(VirtualKeyId::AltRight)),
             _ => Self::from_scan_code(scancode),
         }
     }

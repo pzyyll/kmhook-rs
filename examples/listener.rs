@@ -1,7 +1,7 @@
 #![allow(warnings)]
 
 use kmhook_rs::{
-    types::{EventListener, EventType, KeyCode, KeyId, MouseButton},
+    types::{EventListener, EventType, KeyMappingId, KeyId, MouseButton},
     Listener,
 };
 use std::sync::{Arc, Mutex};
@@ -18,9 +18,9 @@ fn main() {
                     "KeyboardState {:?}",
                     info.keyboard_state.unwrap().usb_input_report()
                 );
-                if info.key_id == KeyId::from(KeyCode::UsA) {
+                if info.key_id == KeyId::from(KeyMappingId::UsA) {
                     println!("Pressed A");
-                } else if info.key_id == KeyId::from(KeyCode::Escape) {
+                } else if info.key_id == KeyId::from(KeyMappingId::Escape) {
                     println!("Pressed Escape");
                     l.as_ref().shutdown();
                 }

@@ -1,48 +1,33 @@
 #![allow(warnings)]
 use std::time::Duration;
 
-use kmhook_rs::types::*;
-use kmhook_rs::*;
+use kmhook::types::*;
+use kmhook::*;
 
-use kmhook_rs::enginer as listener;
+use kmhook::enginer as listener;
 
 fn main() {
     listener::add_global_shortcut(
-        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::UsA]).expect("Failed to create shortcut"),
-        || println!("Ctrl + A"),
-    );
-
-    let result = listener::add_global_shortcut(
-        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::UsA]).expect("Failed to create shortcut"),
-        || println!("Ctrl + A"),
-    );
-    // Shortcut already exists
-    assert_eq!(result.is_err(), true);
-
-    listener::add_global_shortcut(
-        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::ShiftLeft, KeyCode::UsA])
-            .expect("Failed to create shortcut"),
+        "Ctrl+Shift+A",
         || println!("Ctrl + Shift + A"),
     );
 
     listener::add_global_shortcut(
-        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::UsC, KeyCode::UsV])
-            .expect("Failed to create shortcut"),
+        "Ctrl+C+V",
         || println!("Ctrl + C + V"),
     );
 
     listener::add_global_shortcut(
-        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::UsV, KeyCode::UsC])
-            .expect("Failed to create shortcut"),
+        "Ctrl+V+C",
         || println!("Ctrl + V + C"),
     );
 
-    // listener.add_global_shortcut(Shortcut::new(vec![KeyCode::AltLeft]).unwrap(), || {
+    // listener.add_global_shortcut(Shortcut::new(vec![KeyMappingId::AltLeft]).unwrap(), || {
     //     println!("Alt Left")
     // });
 
     listener::add_global_shortcut_trigger(
-        Shortcut::new(vec![KeyCode::AltLeft]).unwrap(),
+        "Alt",
         || {
             println!(
                 "》》》》》》》》》》》Triple Alt {:?}",
@@ -55,7 +40,7 @@ fn main() {
     );
 
     listener::add_global_shortcut_trigger(
-        Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::UsC]).unwrap(),
+        "Ctrl+C",
         || println!("Double Ctrl + C"),
         2,
         Some(400),
@@ -63,7 +48,7 @@ fn main() {
 
     // Illegal shortcut key
     // listener.add_global_shortcut(
-    //     Shortcut::new(vec![KeyCode::ControlLeft, KeyCode::UsV, KeyCode::UsC, KeyCode::UsC]).expect("Failed to create shortcut"),
+    //     Shortcut::new(vec![KeyMappingId::ControlLeft, KeyMappingId::UsV, KeyMappingId::UsC, KeyMappingId::UsC]).expect("Failed to create shortcut"),
     //     || println!("Ctrl + V + C + C"),
     // );
 

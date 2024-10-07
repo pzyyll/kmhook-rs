@@ -22,6 +22,22 @@ use std::time::Instant;
 type FnEvent = Arc<Box<dyn Fn(EventType) + Send + Sync + 'static>>;
 type FnShourtcut = Arc<Box<dyn Fn() + Send + Sync + 'static>>;
 
+#[derive(Clone)]
+struct FnShourtcutTrigger {
+    cb: FnShourtcut,
+}
+
+impl FnShourtcutTrigger {
+    fn from_fn<F>(cb: F) -> Self
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        Self {
+            cb: Arc::new(Box::new(cb)),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct ShortcutTriggerInfo {
     trigger: u32,
@@ -51,7 +67,8 @@ pub struct Listener {
     listener_event_loop: Mutex<Option<Arc<EventLoop>>>,
     worker: Mutex<Option<Arc<Worker>>>,
     event_map: Mutex<HashMap<ID, (EventType, FnEvent)>>,
-    shortcut_map: Mutex<HashMap<ID, (Shortcut, FnShourtcut)>>,
+    shortcut_map: Mutex<HashMap<ID, (Shortcut, FnShourtcutTrigger)>>,
+    shortcut_ex_map: Mutex<HashMap<ID, Vec<ID>>>,
 }
 
 impl Listener {
@@ -79,28 +96,32 @@ impl Listener {
             .collect()
     }
 
-    fn filter_shortcut(&self, et: &EventType) -> Option<FnShourtcut> {
+    fn filter_shortcut(&self, et: &EventType) -> Option<Vec<FnShourtcut>> {
         match et {
             EventType::KeyboardEvent(Some(key_info)) => {
                 if key_info.state != KeyState::Pressed {
                     return None;
                 }
+                let mut result: Vec<FnShourtcut> = Vec::new();
                 if let Some(keyboard_state) = &key_info.keyboard_state {
+                    // println!("filter shortcut: {:?}", keyboard_state);
                     let binding = self.shortcut_map.lock().unwrap();
-                    let usb_input = keyboard_state.clone().usb_input_report().to_vec();
-                    for (_, (shortcut, cb)) in binding.iter() {
-                        if shortcut.is_input_match(&usb_input) {
+                    // let usb_input = keyboard_state.clone().usb_input_report().to_vec();
+                    for (_, (shortcut, trigger)) in binding.iter() {
+                        // println!("filter shortcut check: {:?}", shortcut);
+                        if shortcut.is_match(keyboard_state) {
                             // Check if the modifier key is pressed, and when used with other keys,
                             // the last key pressed must not be a modifier key.
                             if shortcut.has_modifier()
                                 & shortcut.has_normal_key()
                                 & key_info.key_id.is_modifier()
                             {
-                                return None;
+                                continue;
                             }
-                            return Some(cb.clone());
+                            result.push(trigger.cb.clone());
                         }
                     }
+                    return Some(result);
                 }
                 None
             }
@@ -125,8 +146,10 @@ impl Listener {
             }
         }
 
-        if let Some(cb) = self.filter_shortcut(&event_type) {
-            cb();
+        if let Some(cbs) = self.filter_shortcut(&event_type) {
+            for cb in cbs {
+                cb();
+            }
         }
 
         #[cfg(feature = "Debug")]
@@ -175,6 +198,27 @@ impl Listener {
         }
         false
     }
+
+    fn register_shortcut_callback(
+        &self,
+        shortcut: &str,
+        trigger: FnShourtcutTrigger,
+    ) -> Result<usize, String> {
+        let id = self.gen_id();
+        {
+            let shortcut = Shortcut::from_str(shortcut)?;
+            let mut binding = self.shortcut_map.lock().map_err(|e| e.to_string())?;
+            for (_, (sc, _)) in binding.iter() {
+                // println!("sc usb_input: {:?}", sc.usb_input());
+                // println!("shortcut usb_input: {:?}", shortcut.usb_input());
+                if *sc == shortcut {
+                    return Err("Shortcut already exists".to_string());
+                }
+            }
+            binding.insert(id, (shortcut, trigger));
+        }
+        Ok(id)
+    }
 }
 
 impl Drop for Listener {
@@ -191,6 +235,7 @@ impl EventListener for Listener {
             event_map: Mutex::new(HashMap::new()),
             shortcut_map: Mutex::new(HashMap::new()),
             worker: Mutex::new(None),
+            shortcut_ex_map: Mutex::new(HashMap::new()),
         };
         let rc = Arc::new(listener);
         rc.listener_event_loop
@@ -246,30 +291,18 @@ impl EventListener for Listener {
         Ok(id)
     }
 
-    fn add_global_shortcut<F>(&self, shortcut: Shortcut, cb: F) -> std::result::Result<ID, String>
+    fn add_global_shortcut<F>(&self, shortcut: &str, cb: F) -> std::result::Result<ID, String>
     where
         F: Fn() + Send + Sync + 'static,
     {
-        let id = self.gen_id();
-        {
-            let mut binding = self.shortcut_map.lock().unwrap();
-            for (_, (sc, _)) in binding.iter() {
-                // println!("sc usb_input: {:?}", sc.usb_input());
-                // println!("shortcut usb_input: {:?}", shortcut.usb_input());
-                if sc.is_input_match(shortcut.usb_input()) {
-                    return Err("Shortcut already exists".to_string());
-                }
-            }
-            binding.insert(id, (shortcut, Arc::new(Box::new(cb))));
-        }
-
+        let id = self.register_shortcut_callback(shortcut, FnShourtcutTrigger::from_fn(cb))?;
         self.post_recheck_hook();
         Ok(id)
     }
 
     fn add_global_shortcut_trigger<F>(
         &self,
-        shortcut: Shortcut,
+        shortcut: &str,
         cb: F,
         trigger: u32,
         internal: Option<u32>,
@@ -325,6 +358,12 @@ impl EventListener for Listener {
     }
 
     fn del_event_by_id(&self, id: ID) {
+        let ids = self.shortcut_ex_map.lock().unwrap().remove(&id);
+        if let Some(ids) = ids {
+            for id in ids {
+                self.shortcut_map.lock().unwrap().remove(&id);
+            }
+        }
         self.event_map.lock().unwrap().remove(&id);
         self.shortcut_map.lock().unwrap().remove(&id);
         self.post_recheck_hook();
