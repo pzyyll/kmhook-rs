@@ -20,11 +20,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 type FnEvent = Arc<Box<dyn Fn(EventType) + Send + Sync + 'static>>;
-type FnShourtcut = Arc<Box<dyn Fn() + Send + Sync + 'static>>;
+type FnShortcut = Arc<Box<dyn Fn() + Send + Sync + 'static>>;
 
 #[derive(Clone)]
 struct FnShourtcutTrigger {
-    cb: FnShourtcut,
+    cb: FnShortcut,
 }
 
 impl FnShourtcutTrigger {
@@ -96,36 +96,48 @@ impl Listener {
             .collect()
     }
 
-    fn filter_shortcut(&self, et: &EventType) -> Option<Vec<FnShourtcut>> {
-        match et {
-            EventType::KeyboardEvent(Some(key_info)) => {
-                if key_info.state != KeyState::Pressed {
-                    return None;
-                }
-                let mut result: Vec<FnShourtcut> = Vec::new();
-                if let Some(keyboard_state) = &key_info.keyboard_state {
-                    // println!("filter shortcut: {:?}", keyboard_state);
-                    let binding = self.shortcut_map.lock().unwrap();
-                    // let usb_input = keyboard_state.clone().usb_input_report().to_vec();
-                    for (_, (shortcut, trigger)) in binding.iter() {
-                        // println!("filter shortcut check: {:?}", shortcut);
-                        if shortcut.is_match(keyboard_state) {
-                            // Check if the modifier key is pressed, and when used with other keys,
-                            // the last key pressed must not be a modifier key.
-                            if shortcut.has_modifier()
-                                & shortcut.has_normal_key()
-                                & key_info.key_id.is_modifier()
-                            {
-                                continue;
-                            }
-                            result.push(trigger.cb.clone());
+    fn filter_shortcut(&self, et: &EventType) -> Option<Vec<FnShortcut>> {
+        // Match only KeyboardEvent with some key_info
+        if let EventType::KeyboardEvent(Some(key_info)) = et {
+            // Proceed only if the key state is Pressed
+            if key_info.state != KeyState::Pressed {
+                return None;
+            }
+
+            // Extract keyboard_state or return None
+            let keyboard_state = key_info.keyboard_state.as_ref()?;
+
+            // Attempt to lock the shortcut_map; return None if failed
+            let binding = self.shortcut_map.lock().ok()?;
+
+            // Collect all matching trigger callbacks
+            let triggers = binding
+                .iter()
+                .filter_map(|(_, (shortcut, trigger))| {
+                    if shortcut.is_match(keyboard_state) {
+                        // Skip if modifier conditions are not met
+                        if shortcut.has_modifier()
+                            && shortcut.has_normal_key()
+                            && key_info.key_id.is_modifier()
+                        {
+                            None
+                        } else {
+                            Some(trigger.cb.clone())
                         }
+                    } else {
+                        None
                     }
-                    return Some(result);
-                }
+                })
+                .collect::<Vec<_>>();
+
+            // Return Some(triggers) if any triggers are found
+            if !triggers.is_empty() {
+                Some(triggers)
+            } else {
                 None
             }
-            _ => None,
+        } else {
+            None
         }
     }
 
