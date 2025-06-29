@@ -406,7 +406,7 @@ impl EventLoop {
             return;
         }
         unsafe {
-            let _ = PostThreadMessageW(thread_id, WM_USER, WPARAM(msg_type as usize), None);
+            let _ = PostThreadMessageW(thread_id, WM_USER, WPARAM(msg_type as usize), LPARAM(0));
         }
     }
 
@@ -435,7 +435,7 @@ impl EventLoop {
                 0,
                 None,
                 None,
-                hinstance,
+                Some(hinstance),
                 None,
             );
             if hwnd.is_err() {
@@ -525,7 +525,7 @@ impl EventLoop {
             return;
         }
         unsafe {
-            let _ = PostThreadMessageW(loop_thread_id, WM_QUIT, None, None);
+            let _ = PostThreadMessageW(loop_thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
         }
         *self.loop_thread_id.lock().unwrap() = 0;
     }
