@@ -85,9 +85,18 @@ pub struct MouseInfo {
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
+pub struct FocusInfo {
+    pub hwnd: isize,
+    pub process_id: u32,
+    pub thread_id: u32,
+    pub window_title: String,
+}
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub enum EventType {
     KeyboardEvent(Option<KeyInfo>),
     MouseEvent(Option<MouseInfo>),
+    FocusEvent(Option<FocusInfo>),
     All,
 }
 

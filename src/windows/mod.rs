@@ -12,11 +12,11 @@ pub mod listener;
 pub mod types_ext;
 
 // #[cfg(all(feature = "Fake", not(feature = "DLL")))]
-#[path = "event_loop_fake.rs"]
+// #[path = "event_loop_fake.rs"]
 mod event_loop;
 
-
 pub(crate) mod worker;
+pub(crate) mod focus_tracker;
 
 // pub trait KeyIdFrom {
 //     fn from_win(scancode: u32, vkcode: u32) -> std::result::Result<Self, ()>
