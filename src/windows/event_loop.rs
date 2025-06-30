@@ -2,6 +2,9 @@ use crate::types::{
     ClickState, KeyId, KeyInfo, KeyState, MouseButton, MouseInfo, Pos, Shortcut, ID,
 };
 use crate::utils::gen_id;
+use crate::windows::focus_tracker::{
+    initialize_global_focus_tracker, shutdown_global_focus_tracker,
+};
 use crate::windows::worker::{KeyboardSysMsg, MouseSysMsg, WorkerMsg};
 use crate::windows::WM_USER_RECHECK_HOOK;
 use crate::Listener;
@@ -359,6 +362,43 @@ impl EventLoop {
         EVENT_LOOP_MANAGER.lock().unwrap().del_mouse_event(self.id);
     }
 
+    fn set_focus_tracker(&self) {
+        if let Some(listener) = self.listener.upgrade() {
+            if !listener.is_enable_focus_tracker() {
+                return;
+            }
+            let mut focus_tracker = listener.focus_tracker.lock().unwrap();
+            if focus_tracker.is_none() {
+                if let Ok(new_trancker) = initialize_global_focus_tracker(None) {
+                    *focus_tracker = Some(new_trancker);
+                } else {
+                    #[cfg(feature = "Debug")]
+                    println!("Failed to initialize focus tracker.");
+                }
+            }
+        } else {
+            return;
+        }
+    }
+
+    fn unset_focus_tracker(&self) {
+        if let Some(listener) = self.listener.upgrade() {
+            if !listener.is_enable_focus_tracker() {
+                return;
+            }
+            let mut focus_tracker = listener.focus_tracker.lock().unwrap();
+            if focus_tracker.is_some() {
+                shutdown_global_focus_tracker();
+                focus_tracker.take(); // 清理实例
+            } else {
+                #[cfg(feature = "Debug")]
+                println!("Focus tracker is already unset.");
+            }
+        } else {
+            return;
+        }
+    }
+
     fn recheck_hook(&self) {
         if let Some(listener) = self.listener.upgrade() {
             if listener.has_keyboard_event() {
@@ -371,6 +411,12 @@ impl EventLoop {
                 self.set_mouse_hook();
             } else {
                 self.unhook_mouse();
+            }
+
+            if listener.is_enable_focus_tracker() {
+                self.set_focus_tracker();
+            } else {
+                self.unset_focus_tracker();
             }
         }
     }

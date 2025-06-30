@@ -10,6 +10,7 @@
 
 pub mod listener;
 pub mod types_ext;
+pub mod input_send;
 
 // #[cfg(all(feature = "Fake", not(feature = "DLL")))]
 // #[path = "event_loop_fake.rs"]

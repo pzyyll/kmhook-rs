@@ -58,6 +58,14 @@ pub fn shutdown() {
     LISTENER.shutdown();
 }
 
+pub fn enable_focus_tracker(enable: bool) -> bool {
+    LISTENER.enable_focus_tracker(enable)
+}
+
+pub fn send_input_to_prev_window(text: &str) -> bool {
+    LISTENER.send_input_to_prev_window(text)
+}
+
 // 焦点跟踪相关的公共API
 #[cfg(target_os = "windows")]
 pub fn start_focus_tracking(max_history: Option<usize>) -> Result<Arc<FocusTracker>, String> {

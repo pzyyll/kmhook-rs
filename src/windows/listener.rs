@@ -14,8 +14,12 @@ use crate::types::{EventListener, JoinHandleType};
 use crate::types::{EventType, KeyState, Shortcut, ID};
 use crate::utils::gen_id;
 
+use crate::windows::focus_tracker::FocusTracker;
+use crate::windows::input_send;
+
 use std::collections::HashMap;
 use std::result::Result;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -69,6 +73,8 @@ pub struct Listener {
     event_map: Mutex<HashMap<ID, (EventType, FnEvent)>>,
     shortcut_map: Mutex<HashMap<ID, (Shortcut, FnShourtcutTrigger)>>,
     shortcut_ex_map: Mutex<HashMap<ID, Vec<ID>>>,
+    enable_focus_tracker: AtomicBool,
+    pub(crate) focus_tracker: Mutex<Option<Arc<FocusTracker>>>,
 }
 
 impl Listener {
@@ -211,6 +217,11 @@ impl Listener {
         false
     }
 
+    pub fn is_enable_focus_tracker(&self) -> bool {
+        self.enable_focus_tracker
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn register_shortcut_callback(
         &self,
         shortcut: &str,
@@ -248,6 +259,8 @@ impl EventListener for Listener {
             shortcut_map: Mutex::new(HashMap::new()),
             worker: Mutex::new(None),
             shortcut_ex_map: Mutex::new(HashMap::new()),
+            enable_focus_tracker: AtomicBool::new(false),
+            focus_tracker: Mutex::new(None),
         };
         let rc = Arc::new(listener);
         rc.listener_event_loop
@@ -380,5 +393,59 @@ impl EventListener for Listener {
         self.shortcut_map.lock().unwrap().remove(&id);
         self.post_recheck_hook();
         println!("del_event_by_id finish {:?}", id);
+    }
+
+    fn enable_focus_tracker(&self, enable: bool) -> bool {
+        self.enable_focus_tracker
+            .store(enable, std::sync::atomic::Ordering::Relaxed);
+        self.post_recheck_hook();
+        enable
+    }
+
+    fn send_input_to_prev_window(&self, text: &str) -> bool {
+        // 获取 focus_tracker，如果没有则直接返回 false
+        let focus_info = {
+            let guard = self.focus_tracker.lock().unwrap();
+            let tracker = match guard.as_ref() {
+                Some(tracker) => tracker,
+                None => return false,
+            };
+
+            // 获取前一个焦点窗口信息，如果没有则直接返回 false
+            match tracker.get_previous_focus() {
+                Some(info) => info,
+                None => return false,
+            }
+        };
+
+        let current_focus_info = {
+            let guard = self.focus_tracker.lock().unwrap();
+            guard
+                .as_ref()
+                .and_then(|tracker| tracker.get_current_focus())
+        };
+
+        // 如果当前焦点窗口和前一个焦点窗口相同，则不发送输入
+        if let Some(current_focus) = current_focus_info {
+            if current_focus.hwnd == focus_info.hwnd {
+                #[cfg(feature = "Debug")]
+                println!("Current focus window is the same as previous focus, not sending input.");
+                return false;
+            }
+        }
+
+        // 发送文本到窗口
+        let hwnd = focus_info.hwnd;
+        match input_send::send_text(hwnd.get(), text, input_send::SendStrategy::ClipboardPaste) {
+            Ok(_) => {
+                #[cfg(feature = "Debug")]
+                println!("Text sent successfully to window: {:?}", hwnd);
+                true
+            }
+            Err(e) => {
+                println!("Failed to send text: {:?}", e);
+                false
+            }
+        }
     }
 }

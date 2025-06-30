@@ -330,6 +330,9 @@ pub trait EventListener {
 
     fn startup(self: &Arc<Self>, work_thread: Option<bool>) -> Option<JoinHandleType>;
     fn shutdown(&self);
+
+    fn enable_focus_tracker(&self, enable: bool) -> bool;
+    fn send_input_to_prev_window(&self, text: &str) -> bool;
 }
 
 #[cfg(test)]

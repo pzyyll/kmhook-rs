@@ -1,7 +1,10 @@
 // ABOUTME: Windows 平台下的窗口焦点跟踪器
 // ABOUTME: 提供可靠的窗口焦点检测和历史记录功能
 
+#![allow(unused)]
+
 use std::collections::VecDeque;
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::SystemTime;
 // use windows::core::PCWSTR;
@@ -107,6 +110,17 @@ pub struct FocusTracker {
     max_history: usize,
 }
 
+impl Debug for FocusTracker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FocusTracker")
+            .field("current_focus", &self.current_focus)
+            .field("focus_history", &self.focus_history)
+            .field("hook_handle", &self.hook_handle)
+            .field("max_history", &self.max_history)
+            .finish()
+    }
+}
+
 impl FocusTracker {
     pub fn new(max_history: Option<usize>) -> Arc<Self> {
         let tracker = Arc::new(Self {
@@ -199,7 +213,9 @@ impl FocusTracker {
         _dw_event_thread: u32,
         _dwms_event_time: u32,
     ) {
+        // #[cfg(feature = "Debug")]
         println!("Focus changed: HWND={:?}", hwnd);
+
         if !hwnd.is_invalid() {
             let weak_ref_ptr = &raw const TRACKER_WEAK_REF;
             let weak_ref_opt = unsafe { &*weak_ref_ptr };
@@ -292,7 +308,7 @@ pub fn get_global_focus_tracker() -> Option<Arc<FocusTracker>> {
 pub fn initialize_global_focus_tracker(
     max_history: Option<usize>,
 ) -> Result<Arc<FocusTracker>, String> {
-    let tracker = FocusTracker::new(max_history);
+    let tracker: Arc<FocusTracker> = FocusTracker::new(max_history);
     tracker.start_tracking()?;
 
     *GLOBAL_FOCUS_TRACKER.lock().unwrap() = Some(tracker.clone());
