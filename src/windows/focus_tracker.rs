@@ -213,7 +213,7 @@ impl FocusTracker {
         _dw_event_thread: u32,
         _dwms_event_time: u32,
     ) {
-        // #[cfg(feature = "Debug")]
+        #[cfg(feature = "Debug")]
         println!("Focus changed: HWND={:?}", hwnd);
 
         if !hwnd.is_invalid() {

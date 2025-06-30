@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     add_global_shortcut("Digit0", || {
         println!("触发 SendInput 到上一个窗口");
         std::thread::sleep(std::time::Duration::from_millis(150));
-        send_input_to_prev_window("text from focus tracking demo");
+        send_input_to_prev_window("text from focus tracking demo\nline2\nline3");
     })?;
 
     enable_focus_tracker(true);
