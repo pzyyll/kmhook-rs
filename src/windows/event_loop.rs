@@ -48,6 +48,7 @@ thread_local! {
     static LOCAL_HWDN: RefCell<HashMap<ID, HWND>> = RefCell::new(HashMap::new());
     // static LOCAL_KEYBOARD_STATE: RefCell<KeyboardState> = RefCell::new(KeyboardState::new(Some(consts::MAX_KEYS)));
     static LOCAL_KEYBOARD_STATE_S: RefCell<Shortcut> = RefCell::new(Shortcut::default());
+    static BUFFER_POOL: RefCell<Vec<Vec<u8>>> = RefCell::new(Vec::new());
 }
 
 #[derive(Debug)]
@@ -100,13 +101,6 @@ impl EventLoop {
                 KeyState::Pressed
             },
         );
-
-        // let mut old_state: Option<KeyboardState> = None;
-        // LOCAL_KEYBOARD_STATE.with(|state| {
-        //     old_state.replace(state.borrow().clone());
-        //     state.borrow_mut().update_key(key_id.into(), key_info.state);
-        //     key_info.keyboard_state.replace(state.borrow().clone())
-        // });
 
         let mut old_state: Option<Shortcut> = None;
         LOCAL_KEYBOARD_STATE_S.with(|state| {
@@ -225,16 +219,8 @@ impl EventLoop {
                 }
             }
 
-            // int absoluteX = MulDiv(mouse.lLastX, rect.right, USHRT_MAX) + rect.left;
-            // int absoluteY = MulDiv(mouse.lLastY, rect.bottom, USHRT_MAX) + rect.top;
-
             let absolute_x = (mouse.lLastX * rect.right / u16::MAX as i32) + rect.left;
             let absolute_y = (mouse.lLastY * rect.bottom / u16::MAX as i32) + rect.top;
-
-            // println!(
-            //     "Mouse move absolute x: {:?} y: {:?}",
-            //     absolute_x, absolute_y
-            // );
 
             pos.x = absolute_x;
             pos.y = absolute_y;
@@ -243,11 +229,6 @@ impl EventLoop {
             pos.y += last_y;
             rel_pos.x = last_x;
             rel_pos.y = last_y;
-
-            // println!(
-            //     "Mouse move relative x: {:?} y: {:?}, ab: x:{:?} y:{:?}",
-            //     last_x, last_y, pos.x, pos.y
-            // );
         }
 
         let minfo = MouseInfo {
@@ -272,40 +253,127 @@ impl EventLoop {
     ) -> LRESULT {
         match msg {
             WM_INPUT => {
-                let mut dw_size: u32 = 0;
-                let hrawinput: HRAWINPUT = HRAWINPUT(lparam.0 as *mut std::ffi::c_void);
-                GetRawInputData(
-                    hrawinput,
-                    RID_INPUT,
-                    None,
-                    &mut dw_size,
-                    std::mem::size_of::<RAWINPUTHEADER>() as u32,
-                );
-                let mut buffer = vec![0u8; dw_size as usize];
-                GetRawInputData(
-                    hrawinput,
-                    RID_INPUT,
-                    Some(buffer.as_mut_ptr() as *mut std::ffi::c_void),
-                    &mut dw_size,
-                    std::mem::size_of::<RAWINPUTHEADER>() as u32,
-                );
-
-                let rawinput = &*(buffer.as_ptr() as *const RAWINPUT);
-
-                // println!("rawinput: {:?}", rawinput.header.dwType);
-                match RID_DEVICE_INFO_TYPE(rawinput.header.dwType) {
-                    RIM_TYPEKEYBOARD => {
-                        Self::keyboard_proc(rawinput);
-                    }
-                    RIM_TYPEMOUSE => {
-                        Self::mouse_proc(rawinput);
-                    }
-                    _ => {}
+                // 安全边界检查和错误处理
+                if let Err(_e) = Self::handle_raw_input(lparam) {
+                    // #[cfg(feature = "Debug")]
+                    eprintln!("Error handling raw input: {:?}", _e);
                 }
             }
             _ => {}
         }
         DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+
+    fn handle_raw_input(lparam: LPARAM) -> Result<(), &'static str> {
+        let mut dw_size: u32 = 0;
+        let hrawinput: HRAWINPUT = HRAWINPUT(lparam.0 as *mut std::ffi::c_void);
+
+        // 第一次调用获取数据大小
+        let result1 = unsafe {
+            GetRawInputData(
+                hrawinput,
+                RID_INPUT,
+                None,
+                &mut dw_size,
+                std::mem::size_of::<RAWINPUTHEADER>() as u32,
+            )
+        };
+
+        // GetRawInputData 返回 u32，成功时返回数据大小，失败时返回 u32::MAX
+        if result1 == u32::MAX {
+            return Err("Failed to get raw input data size");
+        }
+
+        // 验证数据大小
+        if dw_size == 0 {
+            return Err("Raw input data size is zero");
+        }
+
+        // 防止过大的缓冲区分配
+        const MAX_BUFFER_SIZE: u32 = 1024 * 16; // 16KB 限制
+        if dw_size > MAX_BUFFER_SIZE {
+            return Err("Raw input data size too large");
+        }
+
+        // 确保最小缓冲区大小
+        if dw_size < std::mem::size_of::<RAWINPUTHEADER>() as u32 {
+            return Err("Raw input data size too small");
+        }
+
+        // 使用缓冲区池优化内存分配
+        let mut buffer = BUFFER_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            pool.pop()
+                .unwrap_or_else(|| Vec::with_capacity(dw_size as usize))
+        });
+
+        // 调整缓冲区大小
+        if buffer.capacity() < dw_size as usize {
+            buffer.resize(dw_size as usize, 0);
+        } else {
+            buffer.clear();
+            buffer.resize(dw_size as usize, 0);
+        }
+
+        // 第二次调用获取实际数据
+        let mut actual_size = dw_size;
+        let result2 = unsafe {
+            GetRawInputData(
+                hrawinput,
+                RID_INPUT,
+                Some(buffer.as_mut_ptr() as *mut std::ffi::c_void),
+                &mut actual_size,
+                std::mem::size_of::<RAWINPUTHEADER>() as u32,
+            )
+        };
+
+        if result2 == u32::MAX {
+            // 归还缓冲区到池中
+            Self::return_buffer_to_pool(buffer);
+            return Err("Failed to get raw input data");
+        }
+
+        // 验证实际数据大小
+        if actual_size == 0 || actual_size as usize > buffer.len() {
+            Self::return_buffer_to_pool(buffer);
+            return Err("Invalid actual data size");
+        }
+
+        // 安全地获取 RAWINPUT 结构
+        let rawinput = unsafe { &*(buffer.as_ptr() as *const RAWINPUT) };
+
+        // 使用 catch_unwind 防止 panic 影响系统
+        let result =
+            std::panic::catch_unwind(|| match RID_DEVICE_INFO_TYPE(rawinput.header.dwType) {
+                RIM_TYPEKEYBOARD => {
+                    Self::keyboard_proc(rawinput);
+                }
+                RIM_TYPEMOUSE => {
+                    Self::mouse_proc(rawinput);
+                }
+                _ => {}
+            });
+
+        // 归还缓冲区到池中
+        Self::return_buffer_to_pool(buffer);
+
+        if result.is_err() {
+            return Err("Panic occurred during input processing");
+        }
+
+        Ok(())
+    }
+
+    fn return_buffer_to_pool(buffer: Vec<u8>) {
+        BUFFER_POOL.with(|pool| {
+            let mut pool = pool.borrow_mut();
+            // 限制池大小，避免内存泄漏
+            const MAX_POOL_SIZE: usize = 4;
+            if pool.len() < MAX_POOL_SIZE && buffer.capacity() <= 1024 * 16 {
+                pool.push(buffer);
+            }
+            // 如果缓冲区太大或池已满，则让它自然释放
+        });
     }
 
     fn set_keyboard_hook(&self) {
